@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "manifest_version": "0.0.0-phase0-scaffold",
+  "generated_at": null,
+  "formula_revision": "TY-protsess-2024-v1",
+  "notes": [
+    "This file is populated by scripts/preprocess.py in Phase 2.",
+    "Every entry in `datasets` carries source URL, sha256, retrieval timestamp,",
+    "and CRS so any calculation can be replayed years later from the same bytes."
+  ],
+  "datasets": [],
+  "placeholders": {
+    "q_bar_k": {
+      "in_use": true,
+      "value_l_per_s_km2": 7.0,
+      "reason": "Cartogram raster has not been provided yet. All outputs that depend on q_bar_k are flagged 'placeholder' until the raster is uploaded and this entry is removed."
+    }
+  }
+}
