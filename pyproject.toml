@@ -1,0 +1,77 @@
+[project]
+name = "hydrocalc"
+version = "0.2.0"
+description = "Estonia-specific hydrological analysis platform (svam.ee). Computes Karl Hommik design drainage values from official Estonian geospatial datasets."
+requires-python = ">=3.11"
+
+# Runtime dependencies are managed in requirements-pip.txt (used by the Docker
+# image) and requirements-conda.txt (for GDAL-heavy GIS libs). pyproject.toml is
+# kept here for tool configuration (ruff/black/mypy/pytest) and project metadata
+# so editors and CI both pick it up.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "app",          # legacy Flask app, kept until Phase 3 migration complete
+    "scripts",      # legacy delineation scripts, refactored into backend/services
+    "cypress",
+    "output",
+    "data",
+    ".venv",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pyflakes + pycodestyle
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "SIM",           # simplify
+    "ARG",           # unused arguments
+    "PL",            # pylint subset
+    "RUF",
+]
+ignore = [
+    "PLR0913",  # too-many-arguments (scientific functions legitimately have many)
+    "E501",     # line length handled by formatter
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = '''
+^/(app|scripts|cypress|output|data)/
+'''
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+# Scientific stack often lacks complete stubs; relax for those packages only.
+[[tool.mypy.overrides]]
+module = ["pysheds.*", "rasterio.*", "geopandas.*", "shapely.*", "pyproj.*", "fiona.*", "whitebox.*", "reportlab.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Legacy code is excluded from strict typing until the migration completes.
+module = ["app.*", "scripts.*"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "backend"]
+addopts = "-ra -q --strict-markers --strict-config"
+filterwarnings = [
+    "error",
+    # rasterio/pyproj emit benign deprecation warnings on some platforms
+    "ignore::DeprecationWarning:pyproj.*",
+    "ignore::DeprecationWarning:rasterio.*",
+]
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+    "gis: marks tests that require GIS data fixtures",
+    "reproducibility: marks tests that lock byte-equal scientific output",
+]
