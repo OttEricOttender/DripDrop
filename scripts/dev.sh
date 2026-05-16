@@ -17,14 +17,18 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Prefer the venv when present; fall back to whatever python3 is on PATH.
+PYTHON="${REPO_ROOT}/.venv/bin/python"
+[[ -x "$PYTHON" ]] || PYTHON=python3
+
 cmd="${1:-help}"
 
 case "$cmd" in
   test)
-    PYTHONPATH=. python -m pytest tests/ -v
+    PYTHONPATH=. "$PYTHON" -m pytest tests/ -v
     ;;
   api)
-    PYTHONPATH=. python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+    PYTHONPATH=. "$PYTHON" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
     ;;
   lint)
     ruff check backend tests
@@ -49,7 +53,7 @@ case "$cmd" in
           "maaparandus": 20.0,
           "a_wet_mineral_plus_akm": 20.0
         }
-      }' | python -m json.tool
+      }' | "$PYTHON" -m json.tool
     ;;
   docker)
     docker compose up

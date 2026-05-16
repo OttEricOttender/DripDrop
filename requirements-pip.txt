@@ -17,7 +17,14 @@ python-multipart==0.0.12
 flask==3.0.3
 flask-cors==5.0.0
 
-# Hydrology
+# GIS stack — versions must be kept in sync:
+#   pysheds 0.4 uses np.can_cast(python_float, …) which was removed in NumPy 2.0 (NEP 50).
+#   rasterio 1.5+ requires numpy>=2.  So we pin both to the last compatible pairing.
+#   The conda build (requirements-conda.txt) already pins numpy=1.26.4; this keeps
+#   the local pip venv consistent.
+numpy==1.26.4
+rasterio==1.3.11
+geopandas==1.0.1
 pysheds==0.4
 
 # Database
