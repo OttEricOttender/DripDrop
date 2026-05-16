@@ -11,12 +11,13 @@ Design
 100 × 100 cells, 5 m resolution, EPSG:3301, float32, nodata = -9999.
 
 Elevation:
-    elev[i, j] = max(0.0, 100.0 - 2.0*i + abs(j - 50) * 0.3)
+    elev[i, j] = (99 - i) * 1.0 + abs(j - 50) * 0.5 + 1.0
 
-This produces a V-shaped valley running south:
-  - Row 0 (north edge): ridge ~130 m at col 0, ~115 m at col 50 (valley axis)
-  - Row 99 (south edge): 0 m clipped
+This produces a V-shaped valley running south with NO flat areas:
+  - Row 0  (north): max ~125 m at the corners, 100 m at valley axis
+  - Row 99 (south): min 1 m at outlet (99, 50), 26 m at corners
   - Valley axis (col 50) drains south toward outlet cell (99, 50)
+  - Every cell has a distinct non-zero elevation — no flat zones
   - Accumulation monotonically increases along col 50 from north to south
 
 Synthetic pit:
@@ -46,8 +47,9 @@ OUT = Path(__file__).parent / "synthetic_dem_100x100.tif"
 
 def make_dem() -> np.ndarray:
     i, j = np.mgrid[0:ROWS, 0:COLS]
-    elev = (100.0 - 2.0 * i + np.abs(j - 50) * 0.3).astype(np.float32)
-    elev = np.clip(elev, 0.0, None)
+    # (99-i) gives a southward slope; abs(j-50)*0.5 gives the V-shape.
+    # +1.0 keeps every cell strictly above 0 so there are no flat zones.
+    elev = ((99 - i) * 1.0 + np.abs(j - 50) * 0.5 + 1.0).astype(np.float32)
     # Inject one single-cell pit so fill_pits has a detectable target.
     # Surrounding neighbours along the valley axis are elev[19,50] and elev[21,50].
     # Set the pit 2 m below both.
