@@ -380,24 +380,66 @@ def build_river_index(
 ) -> Path:
     """Build a FlatGeoBuf river index with a ``is_peajogi`` flag.
 
-    Merges Vooluveekogud (all watercourses) with Vooluveekogumid (main
-    river bodies = peajõed) so the runtime can render main rivers with a
-    thicker line weight (confirmed in the original design document).
+    Reads Vooluveekogud (all watercourse segments) and Vooluveekogumid (the
+    main river body polygons = peajõed).  A spatial join marks each segment
+    ``is_peajogi=True`` if it intersects a vooluveekogumid polygon.  This
+    drives the thick/thin line rendering confirmed in the original design
+    document (Google Doc).
+
+    The output is written as FlatGeoBuf, which embeds a spatial index at
+    write time.  Phase 3 can issue fast bbox queries without loading the full
+    national dataset into memory.
 
     Parameters
     ----------
     vooluveekogud_path : Path
-        Reprojected vooluveekogud.shp in EPSG:3301.
+        All watercourse segments in EPSG:3301 (output of reproject_to_lest97).
     vooluveekogumid_path : Path
-        Reprojected vooluveekogumid.shp in EPSG:3301.
+        Main river body polygons in EPSG:3301 (output of reproject_to_lest97).
     output_dir : Path
+        Destination directory; must already exist.
 
     Returns
     -------
     Path
         Path to the written ``rivers.fgb``.
     """
-    raise NotImplementedError("Phase 2 Step 3 — implemented after reproject_to_lest97 lands")
+    rivers = gpd.read_file(vooluveekogud_path)
+    bodies = gpd.read_file(vooluveekogumid_path)
+
+    if rivers.crs is None or rivers.crs.to_epsg() != 3301:
+        raise ValueError(
+            f"vooluveekogud must be in EPSG:3301; got {rivers.crs}. "
+            "Run reproject_to_lest97() first."
+        )
+
+    if len(bodies) == 0:
+        # No vooluveekogumid polygons → every segment is a lisajõgi
+        rivers = rivers.copy()
+        rivers["is_peajogi"] = False
+    else:
+        # Spatial join: find which river segments intersect a body polygon.
+        # predicate='intersects' handles both point-on-boundary and overlap cases.
+        # how='left' keeps all river segments even if they match nothing.
+        joined = gpd.sjoin(rivers, bodies[["geometry"]], how="left", predicate="intersects")
+
+        # sjoin may produce multiple rows per river segment when a segment
+        # intersects more than one polygon.  Take the first match per segment.
+        matched_indices = set(
+            joined.dropna(subset=["index_right"]).index.tolist()
+        )
+        rivers = rivers.copy()
+        rivers["is_peajogi"] = rivers.index.isin(matched_indices)
+
+    out_path = output_dir / "rivers.fgb"
+    rivers.to_file(out_path, driver="FlatGeobuf")
+    logger.info(
+        "River index written: %d segments (%d peajõed) → %s",
+        len(rivers),
+        rivers["is_peajogi"].sum(),
+        out_path,
+    )
+    return out_path
 
 
 # ---------------------------------------------------------------------------
