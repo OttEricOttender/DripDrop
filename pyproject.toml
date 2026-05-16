@@ -69,6 +69,9 @@ filterwarnings = [
     # rasterio/pyproj emit benign deprecation warnings on some platforms
     "ignore::DeprecationWarning:pyproj.*",
     "ignore::DeprecationWarning:rasterio.*",
+    # geopandas 1.0.1 internally references shapely.geos (removed in shapely 2.x)
+    "ignore::DeprecationWarning:shapely.*",
+    "ignore::DeprecationWarning:geopandas.*",
 ]
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",

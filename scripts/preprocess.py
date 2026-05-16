@@ -39,9 +39,11 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import geopandas as gpd
 import numpy as np
 import rasterio
 import rasterio.features
@@ -51,6 +53,8 @@ from pysheds.sview import Raster
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
+
+from backend.utils.hashing import sha256_file
 
 logger = logging.getLogger(__name__)
 
@@ -400,58 +404,217 @@ def build_river_index(
 # Step 2 — CRS normalisation
 # ---------------------------------------------------------------------------
 
+_RASTER_SUFFIXES = {".tif", ".tiff", ".img", ".vrt"}
+_VECTOR_SUFFIXES = {".shp", ".gpkg", ".geojson", ".fgb"}
+
 
 def reproject_to_lest97(src_path: Path, output_dir: Path) -> Path:
     """Reproject a raster or vector file to EPSG:3301 if it isn't already.
 
-    Skips reprojection if the source CRS is already EPSG:3301.  The output
-    filename is ``<stem>_3301<suffix>`` placed in *output_dir*.
+    Detects raster vs vector by file extension.  If the source CRS is already
+    EPSG:3301, returns *src_path* unchanged (no copy made, no disk I/O).
+    Otherwise writes ``<stem>_3301<suffix>`` into *output_dir* and returns
+    that path.
+
+    All reprojected files are written in EPSG:3301 (L-EST97) per the
+    inviolable CRS rule.  The source file is never modified.
 
     Parameters
     ----------
     src_path : Path
     output_dir : Path
+        Destination directory; must already exist.
 
     Returns
     -------
     Path
-        Path to the reprojected file (may equal *src_path* if no conversion
-        was needed).
+        Reprojected file path, or *src_path* if already EPSG:3301.
     """
-    raise NotImplementedError("Phase 2 Step 2 — implemented after download_dataset lands")
+    suffix = src_path.suffix.lower()
+    if suffix in _RASTER_SUFFIXES:
+        return _reproject_raster(src_path, output_dir)
+    if suffix in _VECTOR_SUFFIXES:
+        return _reproject_vector(src_path, output_dir)
+    raise ValueError(
+        f"Unrecognised file type '{suffix}' — add it to _RASTER_SUFFIXES or _VECTOR_SUFFIXES"
+    )
+
+
+def _reproject_raster(src_path: Path, output_dir: Path) -> Path:
+    with rasterio.open(src_path) as src:
+        if src.crs and src.crs.to_epsg() == 3301:
+            logger.debug("reproject_to_lest97: %s is already EPSG:3301, skipping", src_path.name)
+            return src_path
+
+        dst_transform, dst_width, dst_height = rasterio.warp.calculate_default_transform(
+            src.crs, LEST97, src.width, src.height, *src.bounds
+        )
+        dst_meta = src.meta.copy()
+        dst_meta.update(
+            crs=LEST97,
+            transform=dst_transform,
+            width=dst_width,
+            height=dst_height,
+            nodata=DEM_NODATA,
+            compress="deflate",
+        )
+        out_path = output_dir / f"{src_path.stem}_3301{src_path.suffix}"
+        with rasterio.open(out_path, "w", **dst_meta) as dst:
+            for band in range(1, src.count + 1):
+                rasterio.warp.reproject(
+                    source=rasterio.band(src, band),
+                    destination=rasterio.band(dst, band),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=dst_transform,
+                    dst_crs=LEST97,
+                    resampling=Resampling.bilinear,
+                )
+    logger.info("Reprojected raster %s → %s", src_path.name, out_path.name)
+    return out_path
+
+
+def _reproject_vector(src_path: Path, output_dir: Path) -> Path:
+    gdf = gpd.read_file(src_path)
+    if gdf.crs and gdf.crs.to_epsg() == 3301:
+        logger.debug("reproject_to_lest97: %s is already EPSG:3301, skipping", src_path.name)
+        return src_path
+
+    gdf_3301 = gdf.to_crs(epsg=3301)
+    out_path = output_dir / f"{src_path.stem}_3301{src_path.suffix}"
+    suffix = src_path.suffix.lower()
+    driver = "GPKG" if suffix == ".gpkg" else ("GeoJSON" if suffix == ".geojson" else "ESRI Shapefile")
+    gdf_3301.to_file(out_path, driver=driver)
+    logger.info("Reprojected vector %s → %s", src_path.name, out_path.name)
+    return out_path
 
 
 # ---------------------------------------------------------------------------
 # Step 1 — dataset download + sha256 verification
 # ---------------------------------------------------------------------------
 
+_MANIFEST_TEMPLATE: dict[str, Any] = {
+    "schema_version": 1,
+    "manifest_version": "0.2.0-phase2",
+    "generated_at": None,
+    "formula_revision": "TY-protsess-2024-v1",
+    "notes": [
+        "Populated by scripts/preprocess.py.",
+        "Every entry carries source URL, sha256, retrieval timestamp, and CRS",
+        "so any calculation can be replayed years later from the same bytes.",
+    ],
+    "datasets": [],
+    "placeholders": {
+        "q_bar_k": {
+            "in_use": True,
+            "value_l_per_s_km2": 7.0,
+            "reason": (
+                "Cartogram raster not yet provided. All outputs that depend on "
+                "q_bar_k are flagged 'placeholder' until the raster is uploaded."
+            ),
+        }
+    },
+}
 
-def download_dataset(name: str, data_dir: Path) -> Path:
-    """Fetch an official Estonian dataset and verify its sha256.
 
-    The download URL and expected filename come from the DATASETS registry
-    above.  Most datasets are behind the Maa-amet / Keskkonnaportaali web
-    portals and cannot be fetched with a single HTTP request — this function
-    will raise NotImplementedError with a message explaining what to download
-    manually until programmatic download is confirmed possible.
+def download_dataset(
+    name: str,
+    data_dir: Path,
+    manifest_path: Path | None = None,
+) -> Path:
+    """Verify (and optionally pin) the sha256 of a manually downloaded dataset.
+
+    The Maa-amet and Keskkonnaportaali portals do not offer direct-download
+    URLs — files must be downloaded through their web interfaces and placed
+    in ``data_dir/raw/`` before running this pipeline.  This function:
+
+    1. Checks that the expected file exists; raises ``FileNotFoundError``
+       with explicit download instructions if it doesn't.
+    2. Computes the file's SHA-256.
+    3. If no hash is pinned in *manifest_path* yet, records it and returns.
+    4. If a hash is already pinned, verifies the file matches it.  Raises
+       ``ValueError`` if there is a mismatch (bit-rot or unintended update).
 
     Parameters
     ----------
     name : str
-        Key from the DATASETS dict (e.g. ``"vooluveekogud"``).
+        Key from the DATASETS registry (e.g. ``"vooluveekogud"``).
     data_dir : Path
-        Directory where raw downloads are stored (``data/raw/``).
+        Root data directory.  Raw files are expected at ``data_dir/raw/``.
+    manifest_path : Path | None
+        Path to ``datasets.lock.json``.  Defaults to ``data_dir/datasets.lock.json``.
 
     Returns
     -------
     Path
-        Path to the downloaded file.
+        Path to the verified file.
+
+    Raises
+    ------
+    KeyError
+        If *name* is not in the DATASETS registry.
+    FileNotFoundError
+        If the expected file does not exist (with download instructions).
+    ValueError
+        If the file's sha256 does not match the pinned hash.
     """
-    raise NotImplementedError(
-        f"Dataset '{name}' must be downloaded manually from "
-        f"{DATASETS[name]['source']} ({DATASETS[name]['portal_path']}) "
-        f"and placed at {data_dir / DATASETS[name]['filename']}"
-    )
+    if name not in DATASETS:
+        raise KeyError(
+            f"Unknown dataset '{name}'. Known datasets: {sorted(DATASETS)}"
+        )
+
+    info = DATASETS[name]
+    raw_dir = data_dir / "raw"
+    file_path = raw_dir / info["filename"]
+
+    if not file_path.exists():
+        raise FileNotFoundError(
+            f"Dataset '{name}' not found at {file_path}.\n"
+            f"  Download from: {info['source']}\n"
+            f"  Portal path:   {info['portal_path']}\n"
+            f"  Save to:       {file_path}"
+        )
+
+    checksum = sha256_file(file_path)
+
+    if manifest_path is None:
+        manifest_path = data_dir / "datasets.lock.json"
+
+    if manifest_path.exists():
+        manifest = read_manifest(manifest_path)
+    else:
+        import copy
+        manifest = copy.deepcopy(_MANIFEST_TEMPLATE)
+
+    entries: dict[str, Any] = {e["name"]: e for e in manifest.get("datasets", [])}
+
+    if name in entries:
+        pinned = entries[name]["sha256"]
+        if pinned != checksum:
+            raise ValueError(
+                f"SHA-256 mismatch for '{name}':\n"
+                f"  pinned: {pinned}\n"
+                f"  got:    {checksum}\n"
+                f"The file at {file_path} does not match the pinned hash.\n"
+                f"If you intentionally updated the dataset, remove its entry from\n"
+                f"{manifest_path} and re-run to re-pin the new hash."
+            )
+        logger.debug("sha256 OK for '%s'", name)
+    else:
+        entry: dict[str, Any] = {
+            "name": name,
+            "source_url": info["source"],
+            "sha256": checksum,
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "crs": "unknown",        # updated to EPSG:3301 after reproject_to_lest97
+            "resolution_m": None,    # populated for rasters
+            "output_path": str(file_path),
+        }
+        manifest.setdefault("datasets", []).append(entry)
+        write_manifest(manifest, manifest_path)
+        logger.info("Pinned sha256 for '%s': %s", name, checksum)
+
+    return file_path
 
 
 # ---------------------------------------------------------------------------
