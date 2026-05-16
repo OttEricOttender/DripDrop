@@ -282,9 +282,14 @@ def clip_dem(
 ) -> Path:
     """Clip the national DTM to a single valgla polygon and write a COG.
 
-    Uses rasterio masked windows so only the bounding box of the valgla
-    polygon is read into memory — the full 50 GB DTM is never loaded whole.
-    The output is a Cloud-Optimised GeoTIFF (COG) compatible with pysheds.
+    Uses rasterio's masked-window read so only the bounding box of the valgla
+    polygon is loaded — the full 50 GB Estonian DTM is never in memory whole.
+    This bounds RAM usage to the largest valgla (Pärnu ~6 700 km²) even on
+    modest machines.
+
+    The output is written as a deflate-compressed GeoTIFF in EPSG:3301.
+    Cells outside the polygon boundary are set to DEM_NODATA (-9999 float32)
+    so pysheds treats them as no-data and does not route flow across them.
 
     Parameters
     ----------
@@ -295,14 +300,46 @@ def clip_dem(
     kkr_code : str
         KKR identifier used to name the output file (e.g. ``"VEE_1234"``).
     output_dir : Path
-        Directory for clipped DEMs (``data/preprocessed/dem/``).
+        Destination directory; must already exist.
 
     Returns
     -------
     Path
         Path to the written ``<kkr_code>.tif``.
     """
-    raise NotImplementedError("Phase 2 Step 4 — implemented after Step 3 lands")
+    from rasterio.mask import mask as rasterio_mask
+    from shapely.geometry import mapping
+
+    with rasterio.open(dem_path) as src:
+        clipped, transform = rasterio_mask(
+            src,
+            [mapping(valgla_geom)],
+            crop=True,
+            nodata=float(DEM_NODATA),
+            all_touched=False,
+        )
+        # Ensure float32 so pysheds 0.4 can load the nodata without dtype conflicts
+        clipped = clipped.astype(np.float32)
+        meta = src.meta.copy()
+        meta.update(
+            height=clipped.shape[1],
+            width=clipped.shape[2],
+            transform=transform,
+            nodata=float(DEM_NODATA),
+            dtype="float32",
+            compress="deflate",
+            crs=LEST97,
+        )
+
+    out_path = output_dir / f"{kkr_code}.tif"
+    with rasterio.open(out_path, "w", **meta) as dst:
+        dst.write(clipped)
+
+    logger.info(
+        "Clipped DEM for %s: %d×%d px → %s",
+        kkr_code, clipped.shape[2], clipped.shape[1], out_path,
+    )
+    return out_path
 
 
 def process_valgla(
@@ -312,9 +349,11 @@ def process_valgla(
 ) -> tuple[Path, Path]:
     """Condition the clipped DEM and write flow-dir + flow-acc rasters.
 
-    This is the per-valgla entry point for Step 5.  It calls the pure
-    functions condition_dem / compute_flowdir / compute_flowacc and writes
-    the results to disk as GeoTIFFs in EPSG:3301.
+    Runs the pysheds conditioning chain (fill_pits → fill_depressions →
+    resolve_flats → flowdir → accumulation) on the per-valgla DEM clip and
+    writes both outputs to disk in EPSG:3301.  Subdirectories
+    ``output_dir/flowdir/`` and ``output_dir/flowacc/`` are created if
+    they don't exist.
 
     Parameters
     ----------
@@ -323,14 +362,57 @@ def process_valgla(
     kkr_code : str
         KKR identifier used to name the output files.
     output_dir : Path
-        Base directory; flowdir and flowacc subdirs are created as needed.
+        Base directory.
 
     Returns
     -------
     flowdir_path : Path
     flowacc_path : Path
     """
-    raise NotImplementedError("Phase 2 Step 5 disk-write — implemented after clip_dem lands")
+    flowdir_dir = output_dir / "flowdir"
+    flowacc_dir = output_dir / "flowacc"
+    flowdir_dir.mkdir(parents=True, exist_ok=True)
+    flowacc_dir.mkdir(parents=True, exist_ok=True)
+
+    grid, dem = load_dem(dem_clip_path)
+    conditioned = condition_dem(grid, dem)
+    fdir = compute_flowdir(grid, conditioned)
+    acc = compute_flowacc(grid, fdir)
+
+    flowdir_path = flowdir_dir / f"{kkr_code}.tif"
+    flowacc_path = flowacc_dir / f"{kkr_code}.tif"
+
+    _write_pysheds_raster(fdir, flowdir_path)
+    _write_pysheds_raster(acc, flowacc_path)
+
+    logger.info(
+        "process_valgla %s: flowdir → %s, flowacc → %s",
+        kkr_code, flowdir_path, flowacc_path,
+    )
+    return flowdir_path, flowacc_path
+
+
+def _write_pysheds_raster(raster: Raster, path: Path) -> None:
+    """Write a pysheds Raster to a deflate-compressed GeoTIFF in EPSG:3301.
+
+    Always stamps LEST97 as the CRS regardless of what the Raster carries,
+    because all preprocessing work is in EPSG:3301 (inviolable rule #2).
+    """
+    arr = np.asarray(raster)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=arr.shape[0],
+        width=arr.shape[1],
+        count=1,
+        dtype=str(arr.dtype),
+        crs=LEST97,
+        transform=raster.affine,
+        nodata=raster.nodata,
+        compress="deflate",
+    ) as dst:
+        dst.write(arr, 1)
 
 
 # ---------------------------------------------------------------------------
