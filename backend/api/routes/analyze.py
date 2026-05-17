@@ -180,6 +180,11 @@ async def analyze(
         except Exception:
             pass
 
+    try:
+        catchment_geojson: dict | None = crs.to_wgs84_geojson(catchment_poly)
+    except Exception:
+        catchment_geojson = None
+
     return AnalysisResult(
         run_id=uuid.uuid4().hex,
         timestamp=datetime.now(timezone.utc),
@@ -190,6 +195,7 @@ async def analyze(
         catchment=catchment_info,
         landcover=landcover_breakdown,
         hommik=hommik_result,
+        catchment_geojson=catchment_geojson,
         dataset_versions=dataset_versions,
         warnings=warnings,
     )

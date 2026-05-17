@@ -37,3 +37,12 @@ def to_wgs84(x: float, y: float) -> tuple[float, float]:
     """L-EST97 (x, y) → WGS84 (lon, lat)."""
     lon, lat = _transformer(LEST97, WGS84).transform(x, y)
     return lon, lat
+
+
+def to_wgs84_geojson(geometry: object) -> dict:
+    """Convert a Shapely geometry in L-EST97 to a GeoJSON dict in WGS84."""
+    import shapely.ops
+    from shapely.geometry import mapping
+    t = _transformer(LEST97, WGS84)
+    geom_wgs84 = shapely.ops.transform(t.transform, geometry)
+    return dict(mapping(geom_wgs84))

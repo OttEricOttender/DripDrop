@@ -84,6 +84,22 @@ services:
       retries: 5
       timeout: 5s
 
+  # ---- React + Vite frontend (Phase 4) -------------------------------------
+  frontend-service:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: hydrocalc-frontend
+    environment:
+      VITE_API_BASE_URL: http://backend-service:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend-service
+
 volumes:
   hydro_preprocessed:
     name: hydrocalc_preprocessed
