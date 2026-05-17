@@ -63,13 +63,26 @@ def sample_q95(
 ) -> CartogramSample:
     """Return q_95% at the given L-EST97 coordinate.
 
-    Phase 1 returns the supplied ``fallback`` (taken from the API request
-    body) so the calculator can be exercised without preprocessed data.
-    Phase 2 samples ``data/preprocessed/q95.tif`` directly.
+    Samples from ``TopoToR_JOON41.tif`` if ``HYDROCALC_Q95_RASTER_PATH`` is set
+    and the file exists.  Otherwise falls back to ``fallback`` if supplied, or
+    to the configured placeholder value ``q95_placeholder_l_per_s_km2``.
     """
-    if fallback is None:
-        raise ValueError(
-            "q_95% raster sampling is implemented in Phase 2. "
-            "Provide `fallback=` (l/(s·km²)) explicitly until then."
-        )
-    return CartogramSample(value_l_per_s_km2=fallback, source="placeholder", raster_path=None)
+    settings = get_settings()
+
+    raster_path = settings.q95_raster_path
+    if raster_path is not None and raster_path.exists():
+        try:
+            import rasterio
+            with rasterio.open(raster_path) as src:
+                row, col = src.index(x_lest97, y_lest97)
+                value = float(src.read(1)[row, col])
+            if value != src.nodata:
+                return CartogramSample(
+                    value_l_per_s_km2=value, source="raster", raster_path=raster_path
+                )
+        except Exception as exc:
+            logger.warning("q95 raster sampling failed (%s) — using placeholder", exc)
+
+    # Fallback hierarchy: explicit caller value → config placeholder
+    value = fallback if fallback is not None else settings.q95_placeholder_l_per_s_km2
+    return CartogramSample(value_l_per_s_km2=value, source="placeholder", raster_path=None)

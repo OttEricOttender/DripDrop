@@ -35,7 +35,9 @@ import pytest
 import rasterio
 from shapely.geometry import box
 
-from scripts.preprocess import DIRMAP, DEM_NODATA, clip_dem, process_valgla
+import geopandas as gpd
+
+from scripts.preprocess import DIRMAP, DEM_NODATA, clip_dem, process_valgla, vectorize_streams
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -211,3 +213,58 @@ class TestProcessValgla:
         with rasterio.open(flowdir_path) as src_fdir:
             fdir_transform = src_fdir.transform
         assert dem_transform == pytest.approx(fdir_transform, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# vectorize_streams tests
+# ---------------------------------------------------------------------------
+
+
+class TestVectorizeStreams:
+    @pytest.fixture()
+    def flowacc(self, clipped_dem: Path, tmp_path: Path) -> Path:
+        _, flowacc_path = process_valgla(clipped_dem, KKR_CODE, tmp_path)
+        return flowacc_path
+
+    def test_output_is_fgb(self, flowacc: Path, tmp_path: Path) -> None:
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        assert result.suffix == ".fgb"
+
+    def test_output_filename_uses_kkr_code(self, flowacc: Path, tmp_path: Path) -> None:
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        assert result.stem == f"{KKR_CODE}_streams"
+
+    def test_output_exists(self, flowacc: Path, tmp_path: Path) -> None:
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        assert result.exists()
+
+    def test_output_crs_is_lest97(self, flowacc: Path, tmp_path: Path) -> None:
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        gdf = gpd.read_file(result)
+        assert gdf.crs.to_epsg() == 3301
+
+    def test_low_threshold_produces_stream_features(self, flowacc: Path, tmp_path: Path) -> None:
+        """Threshold=1 accepts all non-nodata cells — must produce at least one feature."""
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        gdf = gpd.read_file(result)
+        assert len(gdf) > 0
+
+    def test_high_threshold_produces_fewer_features(self, flowacc: Path, tmp_path: Path) -> None:
+        """Higher threshold must produce fewer (or equal) stream features than lower."""
+        low = gpd.read_file(
+            vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path / "low")
+        )
+        high = gpd.read_file(
+            vectorize_streams(flowacc, KKR_CODE, threshold=10_000, output_dir=tmp_path / "high")
+        )
+        assert len(high) <= len(low)
+
+    def test_kkr_code_column_present(self, flowacc: Path, tmp_path: Path) -> None:
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=tmp_path)
+        gdf = gpd.read_file(result)
+        assert "kkr_code" in gdf.columns
+
+    def test_creates_output_dir_if_missing(self, flowacc: Path, tmp_path: Path) -> None:
+        new_dir = tmp_path / "streams" / "nested"
+        result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=new_dir)
+        assert result.exists()

@@ -45,6 +45,7 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio
 import rasterio.features
 import rasterio.warp
@@ -109,12 +110,6 @@ DATASETS: dict[str, dict[str, str]] = {
         "portal_path": "Maapinna kõrgusmudelid > Kogu Eesti DTM eraldusvõimega 5m (GeoTIFF)",
         "filename": "DTM_5m_eesti.tif",
     },
-    "kolvikud": {
-        # ETAK land-use parcels — provides A_ms, A_r, A_km, B, C for Hommik
-        "source": "https://geoportaal.maaamet.ee/est/Ruumiandmed/Eesti-topograafia-andmekogu/Laadi-ETAK-andmed-alla-p609.html",
-        "portal_path": "Kõlvikud (SHP)",
-        "filename": "kolvikud.shp",
-    },
     "maaparandus": {
         # Land-improvement system influence zones
         "source": "https://geoportaal.maaamet.ee/est/Ruumiandmed/Kitsenduste-andmed/Kitsenduste-andmete-allalaadimine-p624.html",
@@ -129,6 +124,34 @@ DATASETS: dict[str, dict[str, str]] = {
         "filename": "q95.tif",
     },
 }
+
+# ETAK kolvikud is distributed as one shapefile per ETAK category inside this
+# folder (E_301_muu_kolvik_a.shp, E_305_puittaimestik_a.shp, …).  It is not in
+# DATASETS because it is not a single downloadable file — merge_kolvikud() reads
+# all E_3*_a.shp files and produces a single FlatGeoBuf.
+KOLVIKUD_DIR_NAME = "ETAK_Eesti_SHP_kolvikud"
+
+
+# ---------------------------------------------------------------------------
+# CRS helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_lest97(crs: object) -> bool:
+    """Return True if *crs* represents EPSG:3301 (L-EST97), including compound CRS.
+
+    ETAK shapefiles embed a compound CRS (EPSG:3301 horizontal + EVRF2007 height).
+    A plain ``crs.to_epsg() == 3301`` check returns False for compound CRS objects
+    because ``to_epsg()`` returns None.  This helper extracts the horizontal
+    sub-CRS first so the check is correct for both simple and compound inputs.
+    """
+    if crs is None:
+        return False
+    from pyproj import CRS as ProjCRS
+    c = ProjCRS.from_user_input(crs)
+    if c.is_compound:
+        return c.sub_crs_list[0].to_epsg() == 3301
+    return c.to_epsg() == 3301
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +470,50 @@ def vectorize_streams(
     Path
         Path to the written ``<kkr_code>_streams.fgb``.
     """
-    raise NotImplementedError("Phase 2 Step 6 — implemented after process_valgla lands")
+    from shapely.geometry import shape as shapely_shape
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{kkr_code}_streams.fgb"
+
+    with rasterio.open(flowacc_path) as src:
+        acc = src.read(1).astype(np.float64)
+        transform = src.transform
+        nodata = src.nodata
+
+    if nodata is not None:
+        stream_mask = (acc >= threshold) & (acc != float(nodata))
+    else:
+        stream_mask = acc >= threshold
+
+    # rasterio.features.shapes groups connected stream pixels into polygons;
+    # taking each polygon's exterior gives a line representation of the stream
+    # that is sufficient for the Phase 3 snap step.
+    stream_lines = [
+        shapely_shape(geom).exterior
+        for geom, val in rasterio.features.shapes(
+            stream_mask.astype(np.uint8), transform=transform
+        )
+        if int(val) == 1
+    ]
+
+    if not stream_lines:
+        logger.warning(
+            "vectorize_streams %s: no stream cells at threshold=%d; writing empty FlatGeoBuf",
+            kkr_code, threshold,
+        )
+
+    gdf = gpd.GeoDataFrame(
+        {"kkr_code": [kkr_code] * len(stream_lines)},
+        geometry=gpd.GeoSeries(stream_lines, crs=LEST97),
+        crs=LEST97,
+    )
+    gdf.to_file(out_path, driver="FlatGeobuf")
+
+    logger.info(
+        "vectorize_streams %s: %d stream segments (threshold=%d) → %s",
+        kkr_code, len(stream_lines), threshold, out_path,
+    )
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +591,66 @@ def build_river_index(
 
 
 # ---------------------------------------------------------------------------
+# Step 3b — ETAK kolvikud merge
+# ---------------------------------------------------------------------------
+
+
+def merge_kolvikud(kolvikud_dir: Path, output_dir: Path) -> Path:
+    """Merge per-category ETAK kolvikud shapefiles into a single FlatGeoBuf.
+
+    The Maa-amet ETAK download unpacks to one shapefile per category
+    (E_301_muu_kolvik_a.shp, E_305_puittaimestik_a.shp, E_306_margala_a.shp,
+    …).  This function reads all E_3*_a.shp files from *kolvikud_dir*, keeps
+    only ``kood``, ``kood_t``, and ``geometry``, reprojects to simple 2D
+    EPSG:3301 (stripping the EVRF2007 vertical component ETAK embeds), and
+    writes a single ``kolvikud.fgb`` with an embedded spatial index.
+
+    Parameters
+    ----------
+    kolvikud_dir : Path
+        Directory containing ETAK kolvikud shapefiles.
+    output_dir : Path
+        Destination directory; created if it doesn't exist.
+
+    Returns
+    -------
+    Path
+        Path to the written ``kolvikud.fgb``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no E_3*_a.shp files are found in *kolvikud_dir*.
+    """
+    shapefiles = sorted(kolvikud_dir.glob("E_3*_a.shp"))
+    if not shapefiles:
+        raise FileNotFoundError(
+            f"No ETAK kolvikud shapefiles (E_3*_a.shp) found in {kolvikud_dir}.\n"
+            f"Download ETAK Kõlvikud (SHP) from Maa-amet geoportaal:\n"
+            f"https://geoportaal.maaamet.ee/est/Ruumiandmed/Eesti-topograafia-andmekogu/"
+            f"Laadi-ETAK-andmed-alla-p609.html"
+        )
+
+    frames = []
+    for shp in shapefiles:
+        gdf = gpd.read_file(shp)
+        keep = [c for c in ("kood", "kood_t") if c in gdf.columns]
+        # to_crs(epsg=3301) converts compound CRS → simple 2D LEST97 without
+        # changing XY coordinates (horizontal datum is unchanged).
+        frames.append(gdf[keep + ["geometry"]].to_crs(epsg=3301))
+
+    merged = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=LEST97)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / "kolvikud.fgb"
+    merged.to_file(out_path, driver="FlatGeobuf")
+    logger.info(
+        "merge_kolvikud: %d features from %d files → %s",
+        len(merged), len(shapefiles), out_path,
+    )
+    return out_path
+
+
+# ---------------------------------------------------------------------------
 # Step 2 — CRS normalisation
 # ---------------------------------------------------------------------------
 
@@ -566,7 +692,7 @@ def reproject_to_lest97(src_path: Path, output_dir: Path) -> Path:
 
 def _reproject_raster(src_path: Path, output_dir: Path) -> Path:
     with rasterio.open(src_path) as src:
-        if src.crs and src.crs.to_epsg() == 3301:
+        if _is_lest97(src.crs):
             logger.debug("reproject_to_lest97: %s is already EPSG:3301, skipping", src_path.name)
             return src_path
 
@@ -600,7 +726,7 @@ def _reproject_raster(src_path: Path, output_dir: Path) -> Path:
 
 def _reproject_vector(src_path: Path, output_dir: Path) -> Path:
     gdf = gpd.read_file(src_path)
-    if gdf.crs and gdf.crs.to_epsg() == 3301:
+    if _is_lest97(gdf.crs):
         logger.debug("reproject_to_lest97: %s is already EPSG:3301, skipping", src_path.name)
         return src_path
 
@@ -758,22 +884,190 @@ def main() -> None:
         default=Path("data"),
         help="Root data directory (default: data/)",
     )
+    parser.add_argument(
+        "--kkr-col",
+        default=None,
+        help="Column name for the KKR code in valglad.shp (auto-detected if omitted)",
+    )
+    parser.add_argument(
+        "--stream-threshold",
+        type=int,
+        default=500,
+        help="Minimum upstream cell count to classify as a stream cell (default: 500)",
+    )
+    parser.add_argument(
+        "--kolvikud-dir",
+        type=Path,
+        default=Path(KOLVIKUD_DIR_NAME),
+        help=f"Directory containing ETAK kolvikud shapefiles (default: {KOLVIKUD_DIR_NAME}/)",
+    )
+    parser.add_argument(
+        "--msr-vork-path",
+        type=Path,
+        default=Path("20260517-msr_vork_shp") / "msr_vork.shp",
+        help="Path to msr_vork.shp drainage system shapefile (default: 20260517-msr_vork_shp/msr_vork.shp)",
+    )
     args = parser.parse_args()
 
     data_dir: Path = args.data_dir
-    raw_dir = data_dir / "raw"
+    force: bool = args.force
+    reproj_dir = data_dir / "reprojected"
     preprocessed_dir = data_dir / "preprocessed"
     manifest_path = data_dir / "datasets.lock.json"
 
-    logger.info("HydroCalc preprocessor — data dir: %s", data_dir)
-    logger.info(
-        "Steps 1–3 (download / reproject / river index) require manual "
-        "dataset downloads from Maa-amet and Keskkonnaportaali. "
-        "See DATASETS in this file for source URLs."
-    )
+    reproj_dir.mkdir(parents=True, exist_ok=True)
+    dem_clips_dir = preprocessed_dir / "dem"
+    dem_clips_dir.mkdir(parents=True, exist_ok=True)
 
-    # Steps 4–6 loop over valglad — not yet implemented; see NotImplementedError stubs above.
-    logger.info("Pipeline stub complete. Implement steps 1–6 in subsequent Phase 2 commits.")
+    logger.info("HydroCalc preprocessor — data dir: %s", data_dir)
+    logger.info("All datasets must be downloaded manually; see DATASETS in this file for URLs.")
+    if force:
+        logger.info("--force: rebuilding all outputs.")
+
+    # ------------------------------------------------------------------
+    # Step 1 — verify sha256 of every manually downloaded dataset
+    # ------------------------------------------------------------------
+    logger.info("Step 1: Verifying dataset checksums ...")
+    raw_paths: dict[str, Path] = {}
+    for name in DATASETS:
+        raw_paths[name] = download_dataset(name, data_dir, manifest_path=manifest_path)
+        logger.info("  OK: %s", name)
+
+    # ------------------------------------------------------------------
+    # Step 2 — reproject all inputs to EPSG:3301
+    # ------------------------------------------------------------------
+    logger.info("Step 2: Reprojecting inputs to EPSG:3301 ...")
+    lest97_paths: dict[str, Path] = {}
+    for name, raw_path in raw_paths.items():
+        lest97_paths[name] = reproject_to_lest97(raw_path, reproj_dir)
+
+    # ------------------------------------------------------------------
+    # Step 3 — build national river index (FlatGeoBuf)
+    # ------------------------------------------------------------------
+    rivers_fgb = preprocessed_dir / "rivers.fgb"
+    if rivers_fgb.exists() and not force:
+        logger.info("Step 3: rivers.fgb exists — skipping (pass --force to rebuild)")
+    else:
+        logger.info("Step 3: Building river index ...")
+        build_river_index(
+            lest97_paths["vooluveekogud"],
+            lest97_paths["vooluveekogumid"],
+            preprocessed_dir,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 3b — merge ETAK kolvikud shapefiles into kolvikud.fgb
+    # ------------------------------------------------------------------
+    kolvikud_fgb = preprocessed_dir / "kolvikud.fgb"
+    if kolvikud_fgb.exists() and not force:
+        logger.info("Step 3b: kolvikud.fgb exists — skipping (pass --force to rebuild)")
+    else:
+        logger.info("Step 3b: Merging ETAK kolvikud shapefiles from %s ...", args.kolvikud_dir)
+        merge_kolvikud(args.kolvikud_dir, preprocessed_dir)
+
+    # Load valglad once — used by Steps 3c and the per-valgla loop
+    valglad_gdf = gpd.read_file(lest97_paths["valglad"])
+
+    # Auto-detect the KKR code column from common Estonian GIS field names
+    kkr_col = args.kkr_col
+    if kkr_col is None:
+        for candidate in ("VEE_kood", "KKR_kood", "kkr_kood", "kkr", "id"):
+            if candidate in valglad_gdf.columns:
+                kkr_col = candidate
+                break
+        if kkr_col is None:
+            raise ValueError(
+                f"Cannot detect KKR code column in valglad shapefile. "
+                f"Columns found: {list(valglad_gdf.columns)}. "
+                f"Pass --kkr-col <name> to specify it."
+            )
+    logger.info("  KKR column: '%s'  (%d valglad)", kkr_col, len(valglad_gdf))
+
+    # ------------------------------------------------------------------
+    # Step 3c — write valglad polygons to preprocessed/valglad.fgb
+    # ------------------------------------------------------------------
+    valglad_fgb = preprocessed_dir / "valglad.fgb"
+    if valglad_fgb.exists() and not force:
+        logger.info("Step 3c: valglad.fgb exists — skipping (pass --force to rebuild)")
+    else:
+        logger.info("Step 3c: Writing valglad index to valglad.fgb ...")
+        # Normalise the KKR column to 'kkr_code' so Phase 3 find_valgla()
+        # has a stable field name regardless of the source shapefile's schema.
+        out_gdf = (
+            valglad_gdf.rename(columns={kkr_col: "kkr_code"})
+            if kkr_col != "kkr_code"
+            else valglad_gdf.copy()
+        )
+        out_gdf.to_file(valglad_fgb, driver="FlatGeobuf")
+        logger.info("  valglad.fgb written (%d polygons)", len(out_gdf))
+
+    # ------------------------------------------------------------------
+    # Step 3d — copy msr_vork drainage polygons to preprocessed/msr_vork.fgb
+    # ------------------------------------------------------------------
+    msr_vork_fgb = preprocessed_dir / "msr_vork.fgb"
+    if msr_vork_fgb.exists() and not force:
+        logger.info("Step 3d: msr_vork.fgb exists — skipping (pass --force to rebuild)")
+    elif not args.msr_vork_path.exists():
+        logger.warning(
+            "Step 3d: msr_vork.shp not found at %s — skipping. "
+            "Provide path with --msr-vork-path.",
+            args.msr_vork_path,
+        )
+    else:
+        logger.info("Step 3d: Converting msr_vork → msr_vork.fgb ...")
+        msr_gdf = gpd.read_file(args.msr_vork_path).to_crs(epsg=3301)
+        msr_gdf.to_file(msr_vork_fgb, driver="FlatGeobuf")
+        logger.info("  msr_vork.fgb written (%d polygons)", len(msr_gdf))
+
+    # ------------------------------------------------------------------
+    # Steps 4–6 — per-valgla DEM clip, flow grids, stream vectorisation
+    # ------------------------------------------------------------------
+    logger.info("Steps 4-6: Processing per-valgla flow grids (%d valglad) ...", len(valglad_gdf))
+
+    dem_path = lest97_paths["dtm_5m"]
+    streams_dir = preprocessed_dir / "streams"
+
+    for _, row in valglad_gdf.iterrows():
+        kkr_code = str(row[kkr_col])
+        valgla_geom = row.geometry
+
+        # Step 4 — clip DEM
+        dem_clip_path = dem_clips_dir / f"{kkr_code}.tif"
+        if dem_clip_path.exists() and not force:
+            logger.debug("  [%s] DEM clip exists — skipping", kkr_code)
+        else:
+            logger.info("  [%s] Clipping DEM ...", kkr_code)
+            dem_clip_path = clip_dem(valgla_geom, dem_path, kkr_code, dem_clips_dir)
+
+        # Step 5 — flow grids (process_valgla creates flowdir/ and flowacc/ subdirs)
+        flowacc_path = preprocessed_dir / "flowacc" / f"{kkr_code}.tif"
+        if flowacc_path.exists() and not force:
+            logger.debug("  [%s] Flow grids exist — skipping", kkr_code)
+        else:
+            logger.info("  [%s] Computing flow grids ...", kkr_code)
+            _, flowacc_path = process_valgla(dem_clip_path, kkr_code, preprocessed_dir)
+
+        # Step 6 — stream vectorisation
+        streams_fgb = streams_dir / f"{kkr_code}_streams.fgb"
+        if streams_fgb.exists() and not force:
+            logger.debug("  [%s] Stream vectors exist — skipping", kkr_code)
+        else:
+            logger.info("  [%s] Vectorising streams ...", kkr_code)
+            vectorize_streams(flowacc_path, kkr_code, args.stream_threshold, streams_dir)
+
+    # ------------------------------------------------------------------
+    # Step 7 — emit final manifest with updated timestamp
+    # ------------------------------------------------------------------
+    logger.info("Step 7: Updating manifest ...")
+    if manifest_path.exists():
+        manifest = read_manifest(manifest_path)
+    else:
+        import copy
+        manifest = copy.deepcopy(_MANIFEST_TEMPLATE)
+    manifest["generated_at"] = datetime.now(timezone.utc).isoformat()
+    write_manifest(manifest, manifest_path)
+    logger.info("Manifest written: %s", manifest_path)
+    logger.info("HydroCalc preprocessing complete.")
 
 
 if __name__ == "__main__":

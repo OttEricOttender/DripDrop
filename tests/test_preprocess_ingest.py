@@ -29,7 +29,14 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 from backend.utils.hashing import sha256_file
-from scripts.preprocess import download_dataset, read_manifest, reproject_to_lest97, write_manifest
+from scripts.preprocess import (
+    _is_lest97,
+    download_dataset,
+    merge_kolvikud,
+    read_manifest,
+    reproject_to_lest97,
+    write_manifest,
+)
 
 # ---------------------------------------------------------------------------
 # Helper factories
@@ -272,3 +279,163 @@ class TestDownloadDataset:
         """FileNotFoundError must mention where to download the dataset from."""
         with pytest.raises(FileNotFoundError, match="register.keskkonnaportaal"):
             download_dataset("vooluveekogud", tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# 4. manifest round-trip (write_manifest / read_manifest)
+# ---------------------------------------------------------------------------
+
+
+class TestManifestRoundTrip:
+    def test_write_then_read_preserves_content(self, tmp_path: Path) -> None:
+        manifest = {
+            "schema_version": 1,
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "datasets": [
+                {
+                    "name": "vooluveekogud",
+                    "source_url": "https://register.keskkonnaportaal.ee/register",
+                    "sha256": "abc123",
+                    "retrieved_at": "2026-01-01T00:00:00+00:00",
+                    "crs": "EPSG:3301",
+                    "resolution_m": None,
+                    "output_path": "/data/raw/vooluveekogud.shp",
+                }
+            ],
+        }
+        path = tmp_path / "datasets.lock.json"
+        write_manifest(manifest, path)
+        assert read_manifest(path) == manifest
+
+    def test_write_creates_valid_json(self, tmp_path: Path) -> None:
+        manifest = {"schema_version": 1, "datasets": []}
+        path = tmp_path / "datasets.lock.json"
+        write_manifest(manifest, path)
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        assert parsed["schema_version"] == 1
+
+    def test_read_raises_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            read_manifest(tmp_path / "nonexistent.json")
+
+    def test_utf8_estonian_chars_survive_roundtrip(self, tmp_path: Path) -> None:
+        """Estonian field names must survive write → read unchanged."""
+        manifest = {"schema_version": 1, "notes": ["maaparandussüsteemide mõjualad"]}
+        path = tmp_path / "datasets.lock.json"
+        write_manifest(manifest, path)
+        assert read_manifest(path)["notes"][0] == "maaparandussüsteemide mõjualad"
+
+    def test_file_is_indented_json(self, tmp_path: Path) -> None:
+        """Output must be human-readable indented JSON (not one-liner)."""
+        path = tmp_path / "datasets.lock.json"
+        write_manifest({"schema_version": 1, "datasets": []}, path)
+        raw = path.read_text(encoding="utf-8")
+        assert "\n" in raw
+
+
+# ---------------------------------------------------------------------------
+# 5. _is_lest97 — compound CRS detection
+# ---------------------------------------------------------------------------
+
+
+class TestIsLest97:
+    def test_simple_epsg3301_returns_true(self) -> None:
+        assert _is_lest97(CRS.from_epsg(3301)) is True
+
+    def test_wgs84_returns_false(self) -> None:
+        assert _is_lest97(CRS.from_epsg(4326)) is False
+
+    def test_none_returns_false(self) -> None:
+        assert _is_lest97(None) is False
+
+    def test_compound_lest97_returns_true(self) -> None:
+        """Compound CRS with EPSG:3301 horizontal must return True.
+
+        ETAK shapefiles embed a compound CRS (EPSG:3301 + EVRF2007 height).
+        pyproj can construct one via the "EPSG:3301+5705" notation.
+        """
+        from pyproj import CRS as ProjCRS
+        compound = ProjCRS.from_user_input("EPSG:3301+5705")
+        assert _is_lest97(compound) is True
+
+    def test_compound_wgs84_returns_false(self) -> None:
+        """Compound CRS with WGS84 horizontal must return False."""
+        from pyproj import CRS as ProjCRS
+        compound = ProjCRS.from_user_input("EPSG:4326+5705")
+        assert _is_lest97(compound) is False
+
+
+# ---------------------------------------------------------------------------
+# 6. merge_kolvikud
+# ---------------------------------------------------------------------------
+
+
+def _write_kolvikud_shp(path: Path, kood: int, kood_t: str, n: int = 2) -> None:
+    """Write a synthetic ETAK kolvikud shapefile with *n* polygon features."""
+    geoms = [
+        box(500_000 + i * 1_000, 6_490_000, 501_000 + i * 1_000, 6_491_000)
+        for i in range(n)
+    ]
+    gdf = gpd.GeoDataFrame(
+        {"kood": [kood] * n, "kood_t": [kood_t] * n},
+        geometry=geoms,
+        crs="EPSG:3301",
+    )
+    gdf.to_file(path, driver="ESRI Shapefile")
+
+
+@pytest.fixture()
+def kolvikud_dir(tmp_path: Path) -> Path:
+    """Synthetic kolvikud folder with two category shapefiles (305 and 306)."""
+    k_dir = tmp_path / "ETAK_Eesti_SHP_kolvikud"
+    k_dir.mkdir()
+    _write_kolvikud_shp(k_dir / "E_305_puittaimestik_a.shp", 305, "puittaimestik", n=2)
+    _write_kolvikud_shp(k_dir / "E_306_margala_a.shp", 306, "märgala", n=1)
+    return k_dir
+
+
+class TestMergeKolvikud:
+    def test_output_is_fgb(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        assert result.suffix == ".fgb"
+
+    def test_output_named_kolvikud(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        assert result.stem == "kolvikud"
+
+    def test_output_exists(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        assert result.exists()
+
+    def test_all_features_present(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        """2 features from E_305 + 1 from E_306 = 3 total."""
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        gdf = gpd.read_file(result)
+        assert len(gdf) == 3
+
+    def test_kood_column_present(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        gdf = gpd.read_file(result)
+        assert "kood" in gdf.columns
+
+    def test_both_codes_in_output(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        gdf = gpd.read_file(result)
+        codes = set(gdf["kood"].tolist())
+        assert 305 in codes and 306 in codes
+
+    def test_crs_is_lest97(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        result = merge_kolvikud(kolvikud_dir, tmp_path / "out")
+        gdf = gpd.read_file(result)
+        assert gdf.crs.to_epsg() == 3301
+
+    def test_creates_output_dir_if_missing(self, kolvikud_dir: Path, tmp_path: Path) -> None:
+        new_dir = tmp_path / "nested" / "output"
+        result = merge_kolvikud(kolvikud_dir, new_dir)
+        assert result.exists()
+
+    def test_raises_if_no_shapefiles_found(self, tmp_path: Path) -> None:
+        empty_dir = tmp_path / "empty_kolvikud"
+        empty_dir.mkdir()
+        with pytest.raises(FileNotFoundError, match="E_3"):
+            merge_kolvikud(empty_dir, tmp_path / "out")

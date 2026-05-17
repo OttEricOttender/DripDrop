@@ -49,9 +49,13 @@ class Settings(BaseSettings):
     wgs84_crs: str = "EPSG:4326"
 
     # ---- Hydrology ------------------------------------------------------
-    # Snap distance for "find nearest watercourse" per TÜ_projekt_protsess.pdf
+    # Flow-grid cell snap tolerance (pysheds snap_to_mask), per TÜ_projekt_protsess.pdf
     # step 2.c.ii: "Eeldatavalt punktil nt 30 m puhver".
     snap_buffer_m: float = 30.0
+
+    # Maximum search radius for finding the nearest river in rivers.fgb.
+    # The FlatGeoBuf bbox query uses ±snap_search_radius_m around the click point.
+    snap_search_radius_m: float = 5000.0
 
     # Hommik formula revision identifier — embedded into every result so we
     # can trace which formula version produced any historical PDF report.
@@ -66,6 +70,12 @@ class Settings(BaseSettings):
     # flagged with ``q_bar_k_source = "placeholder"`` in the result schema.
     q_bar_k_placeholder_l_per_s_km2: float = 7.0
     q_bar_k_raster_path: Path | None = None  # set when user provides raster
+
+    # q_95% cartogram — Joon 4.1 from Hüdroloogilised arvutused 2020.
+    # Provided by user as TopoToR_JOON41.tif; sampled at the snapped point.
+    # Placeholder used until raster is placed at q95_raster_path.
+    q95_placeholder_l_per_s_km2: float = 2.0
+    q95_raster_path: Path | None = None  # set via HYDROCALC_Q95_RASTER_PATH
 
     # ---- Feature flags --------------------------------------------------
     enable_legacy_flask: bool = Field(

@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import __version__
-from backend.api.routes import health, hommik
+from backend.api.routes import analyze, health, hommik
 from backend.config import get_settings
 from backend.utils.logging import configure_logging
 
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(hommik.router)
+    app.include_router(analyze.router)
 
     return app
 

@@ -3,6 +3,11 @@
 /.idea
 /qodana.yaml
 
+# Large local GIS source data (user-provided; not version-controlled)
+/ETAK_Eesti_SHP_kolvikud/
+/20260517-msr_vork_shp/
+/20260517-mpy_tegevuspiirkond_shp/
+
 # Data — never check in raw rasters or preprocessed GIS layers. The
 # datasets.lock.json manifest under data/ IS checked in (re-included below).
 /data/raw/

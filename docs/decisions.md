@@ -154,3 +154,26 @@ update.
 invocation.
 **Consequences:** Image stays small. Preprocessing runs once per host.
 Phase 6 adds a `docker compose run preprocessor` convenience entry.
+
+## ADR-011 — 80/20 märgala split for A_ms / A_r
+
+**Status:** accepted (Phase 3) — legacy approximation, no primary source
+**Context:** The Karl Hommik formulas (1.5) and (1.7) use A_ms (madalsood ja
+soometsad) and A_r (rabad) as separate inputs. The source document
+*Hüdroloogilised arvutused 2020* (T. Timmusk) expects these to be measured
+separately from soil maps. ETAK Kõlvikud (the official Estonian land-use dataset)
+does not distinguish low-bogs from raised-bogs within kood 306 (märgala) —
+every wetland polygon has the same kood regardless of peat type.
+**Decision:** Split all non-drained märgala (kood 306 outside msr_vork) 80/20
+into A_ms and A_r. This ratio comes from the legacy `scripts/delineate.py`
+implementation. No primary PDF citation has been found; the ratio is a
+practical approximation used historically by the project team.
+**Alternatives considered:** A_ms = 100 %, A_r = 0 % (simplest, but ignores
+raised-bog contribution to r_s); request soil map data per catchment (correct
+but requires a data source not in scope); treat as a single "wetland" input
+(would require a formula revision).
+**Consequences:** Results flagged with warning "A_ms/A_r split uses 80/20
+legacy approximation" in AnalysisResult.warnings. The split is centralized in
+`backend/services/landcover.py` constants `_A_MS_FRACTION` / `_A_R_FRACTION`
+so it can be updated in one place if primary source data is found. Any change
+must bump `hommik_formula_revision` in `backend/config.py`.
