@@ -883,6 +883,58 @@ def download_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Per-valgla worker (top-level so ProcessPoolExecutor can pickle it)
+# ---------------------------------------------------------------------------
+
+
+def _process_one_valgla(
+    kkr_code: str,
+    valgla_geom: Any,
+    dem_path: Path,
+    preprocessed_dir: Path,
+    dem_clips_dir: Path,
+    streams_dir: Path,
+    stream_threshold: int,
+    force: bool,
+) -> str:
+    """Clip DEM, compute flow grids, and vectorise streams for one valgla.
+
+    Designed to run in a subprocess (ProcessPoolExecutor). Configures its own
+    logger since parent logging state is not inherited across process boundaries.
+    Returns kkr_code on success; re-raises on failure so the parent can log it.
+    """
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.INFO,
+        format="%(levelname)s [worker-%(process)d] %(message)s",
+    )
+    _log = _logging.getLogger(__name__)
+
+    dem_clip_path = dem_clips_dir / f"{kkr_code}.tif"
+    if dem_clip_path.exists() and not force:
+        _log.debug("  [%s] DEM clip exists — skipping", kkr_code)
+    else:
+        _log.info("  [%s] Clipping DEM ...", kkr_code)
+        dem_clip_path = clip_dem(valgla_geom, dem_path, kkr_code, dem_clips_dir)
+
+    flowacc_path = preprocessed_dir / "flowacc" / f"{kkr_code}.tif"
+    if flowacc_path.exists() and not force:
+        _log.debug("  [%s] Flow grids exist — skipping", kkr_code)
+    else:
+        _log.info("  [%s] Computing flow grids ...", kkr_code)
+        _, flowacc_path = process_valgla(dem_clip_path, kkr_code, preprocessed_dir)
+
+    streams_fgb = streams_dir / f"{kkr_code}_streams.fgb"
+    if streams_fgb.exists() and not force:
+        _log.debug("  [%s] Stream vectors exist — skipping", kkr_code)
+    else:
+        _log.info("  [%s] Vectorising streams ...", kkr_code)
+        vectorize_streams(flowacc_path, kkr_code, stream_threshold, streams_dir)
+
+    return kkr_code
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -921,6 +973,12 @@ def main() -> None:
         type=Path,
         default=Path("20260517-msr_vork_shp") / "msr_vork.shp",
         help="Path to msr_vork.shp drainage system shapefile (default: 20260517-msr_vork_shp/msr_vork.shp)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel worker processes for per-valgla DEM pipeline (default: 1 = sequential)",
     )
     args = parser.parse_args()
 
@@ -1067,38 +1125,43 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Steps 4–6 — per-valgla DEM clip, flow grids, stream vectorisation
     # ------------------------------------------------------------------
-    logger.info("Steps 4-6: Processing per-valgla flow grids (%d valglad) ...", len(valglad_gdf))
+    logger.info(
+        "Steps 4-6: Processing per-valgla flow grids (%d valglad, %d workers) ...",
+        len(valglad_gdf), args.workers,
+    )
 
     dem_path = lest97_paths["dtm_5m"]
     streams_dir = preprocessed_dir / "streams"
 
-    for _, row in valglad_gdf.iterrows():
-        kkr_code = str(row[kkr_col])
-        valgla_geom = row.geometry
+    rows = [(str(row[kkr_col]), row.geometry) for _, row in valglad_gdf.iterrows()]
+    worker_kwargs: dict = dict(
+        dem_path=dem_path,
+        preprocessed_dir=preprocessed_dir,
+        dem_clips_dir=dem_clips_dir,
+        streams_dir=streams_dir,
+        stream_threshold=args.stream_threshold,
+        force=force,
+    )
 
-        # Step 4 — clip DEM
-        dem_clip_path = dem_clips_dir / f"{kkr_code}.tif"
-        if dem_clip_path.exists() and not force:
-            logger.debug("  [%s] DEM clip exists — skipping", kkr_code)
-        else:
-            logger.info("  [%s] Clipping DEM ...", kkr_code)
-            dem_clip_path = clip_dem(valgla_geom, dem_path, kkr_code, dem_clips_dir)
-
-        # Step 5 — flow grids (process_valgla creates flowdir/ and flowacc/ subdirs)
-        flowacc_path = preprocessed_dir / "flowacc" / f"{kkr_code}.tif"
-        if flowacc_path.exists() and not force:
-            logger.debug("  [%s] Flow grids exist — skipping", kkr_code)
-        else:
-            logger.info("  [%s] Computing flow grids ...", kkr_code)
-            _, flowacc_path = process_valgla(dem_clip_path, kkr_code, preprocessed_dir)
-
-        # Step 6 — stream vectorisation
-        streams_fgb = streams_dir / f"{kkr_code}_streams.fgb"
-        if streams_fgb.exists() and not force:
-            logger.debug("  [%s] Stream vectors exist — skipping", kkr_code)
-        else:
-            logger.info("  [%s] Vectorising streams ...", kkr_code)
-            vectorize_streams(flowacc_path, kkr_code, args.stream_threshold, streams_dir)
+    if args.workers == 1:
+        for kkr_code, geom in rows:
+            _process_one_valgla(kkr_code, geom, **worker_kwargs)
+    else:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(_process_one_valgla, kc, geom, **worker_kwargs): kc
+                for kc, geom in rows
+            }
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                kc = futures[future]
+                try:
+                    future.result()
+                    logger.info("  [%d/%d done] %s", done, len(rows), kc)
+                except Exception as exc:
+                    logger.error("  [%d/%d FAILED] %s: %s", done, len(rows), kc, exc)
 
     # ------------------------------------------------------------------
     # Step 7 — emit final manifest with updated timestamp
