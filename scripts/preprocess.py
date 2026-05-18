@@ -1133,7 +1133,12 @@ def main() -> None:
     dem_path = lest97_paths["dtm_5m"]
     streams_dir = preprocessed_dir / "streams"
 
-    rows = [(str(row[kkr_col]), row.geometry) for _, row in valglad_gdf.iterrows()]
+    # Sort ascending by area so small basins run first; large basins (memory hogs)
+    # run last when fewer workers compete for RAM.
+    valglad_sorted = valglad_gdf.copy()
+    valglad_sorted["_area"] = valglad_sorted.geometry.area
+    valglad_sorted = valglad_sorted.sort_values("_area")
+    rows = [(str(row[kkr_col]), row.geometry) for _, row in valglad_sorted.iterrows()]
     worker_kwargs: dict = dict(
         dem_path=dem_path,
         preprocessed_dir=preprocessed_dir,
