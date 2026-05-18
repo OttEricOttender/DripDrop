@@ -568,17 +568,27 @@ def build_river_index(
     # Rename portal column names to the stable schema that snap_to_stream reads.
     rivers = rivers.rename(columns={"kr_kood": "kood", "pikk_arv": "pikkus"})
 
-    # Mark peajõed via attribute join on the KKR code.
-    # The real vooluveekogumid dataset is LineString (not Polygon), so a spatial
-    # join is not applicable.  Each vooluveekogud segment carries kood = the KKR
-    # code of the water body it belongs to; vooluveekogumid rows are the body-level
-    # records with the same kood.  A segment is a peajõgi if its kood appears in
-    # the body table.
+    # Mark peajõed via attribute join.
+    # The real vooluveekogumid dataset is LineString (not Polygon) so spatial
+    # join is not applicable.  The kood schemes differ between the two layers:
+    #   vooluveekogud  kr_kood → kood (after rename): "VEE1041200"
+    #   vooluveekogumid kood:                          "1041200_1"
+    # Strip "VEE" from the river kood and the "_N" suffix from the body kood
+    # to obtain a common numeric base for the join.
     if len(bodies) == 0:
         rivers["is_peajogi"] = False
     else:
-        kogum_koods = set(bodies["kood"].dropna().astype(str))
-        rivers["is_peajogi"] = rivers["kood"].astype(str).isin(kogum_koods)
+        body_kood_col = "kood" if "kood" in bodies.columns else bodies.columns[0]
+        kogum_numeric = (
+            bodies[body_kood_col]
+            .dropna()
+            .astype(str)
+            .str.split("_")
+            .str[0]
+        )
+        kogum_set = set(kogum_numeric)
+        river_numeric = rivers["kood"].astype(str).str.replace("^VEE", "", regex=True)
+        rivers["is_peajogi"] = river_numeric.isin(kogum_set)
 
     # Keep only the columns that snap_to_stream reads; discard the rest.
     keep = [c for c in ("kood", "nimi", "tyyp", "pikkus", "is_peajogi") if c in rivers.columns]
@@ -979,11 +989,15 @@ def main() -> None:
     # Load valglad once — used by Steps 3c and the per-valgla loop
     valglad_gdf = gpd.read_file(lest97_paths["valglad"])
 
-    # Auto-detect the KKR code column from common Estonian GIS field names
+    # Auto-detect the KKR code column from common Estonian GIS field names.
+    # Require the winning column to have at least one non-null value so we
+    # don't silently pick an all-null placeholder column (e.g. the real data
+    # has a 'kood' column that is entirely NULL while 'veekogu_ko' carries the
+    # actual VEE-prefixed codes).
     kkr_col = args.kkr_col
     if kkr_col is None:
-        for candidate in ("VEE_kood", "KKR_kood", "kkr_kood", "kkr", "kood", "id"):
-            if candidate in valglad_gdf.columns:
+        for candidate in ("VEE_kood", "KKR_kood", "kkr_kood", "kkr", "veekogu_ko", "kood", "id"):
+            if candidate in valglad_gdf.columns and valglad_gdf[candidate].notna().any():
                 kkr_col = candidate
                 break
         if kkr_col is None:

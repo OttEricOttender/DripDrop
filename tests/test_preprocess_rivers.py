@@ -50,10 +50,14 @@ _BODY_B = LineString([(504_000, 6_500_000), (510_000, 6_500_000)])
 
 @pytest.fixture()
 def vooluveekogud(tmp_path: Path) -> Path:
-    """Two river segments: one peajõgi (inside polygon), one lisajõgi."""
+    """Two river segments (already renamed from kr_kood): one peajõgi, one lisajõgi.
+
+    Uses the real kr_kood format (VEE<numeric>) so the is_peajogi join
+    can strip the 'VEE' prefix and compare against body kood numerics.
+    """
     gdf = gpd.GeoDataFrame(
         {
-            "kood": ["VEE-001", "VEE-002"],
+            "kood": ["VEE1000001", "VEE1000002"],
             "nimi": ["Suur Jõgi", "Väike Oja"],
             "tyyp": ["jõgi", "oja"],
             "pikkus": [10_000.0, 5_000.0],
@@ -68,9 +72,9 @@ def vooluveekogud(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def vooluveekogumid_single(tmp_path: Path) -> Path:
-    """One body segment whose kood matches river1 only."""
+    """One body segment matching river1 via numeric kood (1000001_1 ↔ VEE1000001)."""
     gdf = gpd.GeoDataFrame(
-        {"kood": ["VEE-001"], "nimi": ["Suur Jõgi vesikogu"]},
+        {"kood": ["1000001_1"], "nimi": ["Suur Jõgi vesikogu"]},
         geometry=[_BODY_A],
         crs="EPSG:3301",
     )
@@ -81,10 +85,10 @@ def vooluveekogumid_single(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def vooluveekogumid_two_polys(tmp_path: Path) -> Path:
-    """Two body segments both with kood=VEE-001 — exercises deduplication."""
+    """Two body segments both with numeric kood 1000001 — exercises deduplication."""
     gdf = gpd.GeoDataFrame(
         {
-            "kood": ["VEE-001", "VEE-001"],
+            "kood": ["1000001_1", "1000001_2"],
             "nimi": ["Vesikogu A", "Vesikogu B"],
         },
         geometry=[_BODY_A, _BODY_B],
@@ -132,7 +136,7 @@ class TestBuildRiverIndex:
     ) -> None:
         result = build_river_index(vooluveekogud, vooluveekogumid_single, tmp_path)
         gdf = gpd.read_file(result)
-        river1_row = gdf[gdf["kood"] == "VEE-001"]
+        river1_row = gdf[gdf["kood"] == "VEE1000001"]
         assert len(river1_row) == 1
         assert bool(river1_row.iloc[0]["is_peajogi"]) is True
 
@@ -141,7 +145,7 @@ class TestBuildRiverIndex:
     ) -> None:
         result = build_river_index(vooluveekogud, vooluveekogumid_single, tmp_path)
         gdf = gpd.read_file(result)
-        river2_row = gdf[gdf["kood"] == "VEE-002"]
+        river2_row = gdf[gdf["kood"] == "VEE1000002"]
         assert len(river2_row) == 1
         assert bool(river2_row.iloc[0]["is_peajogi"]) is False
 
@@ -179,7 +183,7 @@ class TestBuildRiverIndex:
         bbox = (498_000, 6_499_000, 512_000, 6_501_000)
         subset = gpd.read_file(result, bbox=bbox)
         assert len(subset) == 1
-        assert subset.iloc[0]["kood"] == "VEE-001"
+        assert subset.iloc[0]["kood"] == "VEE1000001"
 
     def test_empty_vooluveekogumid_all_false(
         self, tmp_path: Path, vooluveekogud: Path
