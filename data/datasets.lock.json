@@ -8,7 +8,62 @@
     "Every entry in `datasets` carries source URL, sha256, retrieval timestamp,",
     "and CRS so any calculation can be replayed years later from the same bytes."
   ],
-  "datasets": [],
+  "datasets": [
+    {
+      "name": "vooluveekogud",
+      "source_url": "https://register.keskkonnaportaal.ee/register",
+      "sha256": "254e50b6cd9f5d9093e8ec23698d5412a8a83c23b431205f11201f3ff047ba5e",
+      "retrieved_at": "2026-05-18T13:03:04.919999+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/kr_vooluvesi/kr_vooluvesiLine.shp"
+    },
+    {
+      "name": "vooluveekogumid",
+      "source_url": "https://register.keskkonnaportaal.ee/register",
+      "sha256": "cdf8785e7bd67026eed9b18cc34625c1ebf1f582f85d2fcbc4b2e2588cb629ea",
+      "retrieved_at": "2026-05-18T13:03:04.927210+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/kr_vooluvesi_kogum/kr_vooluvesi_kogumLine.shp"
+    },
+    {
+      "name": "jarv",
+      "source_url": "https://register.keskkonnaportaal.ee/register",
+      "sha256": "000492cb1f4dce418be24eb9acb6487b40ef58157d480d066f4aab14c20eb700",
+      "retrieved_at": "2026-05-18T13:03:04.933235+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/kr_jarv/kr_jarvPolygon.shp"
+    },
+    {
+      "name": "mereala",
+      "source_url": "https://register.keskkonnaportaal.ee/register",
+      "sha256": "ecee6d32bd962f6b8ba2e70de771be7b0a20111ce3867e814fc9daa9baf17b18",
+      "retrieved_at": "2026-05-18T13:03:04.945002+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/kr_mereala/kr_merealaPolygon.shp"
+    },
+    {
+      "name": "valglad",
+      "source_url": "https://register.keskkonnaportaal.ee/register",
+      "sha256": "84a2e5a52655a886cbcd0d057af5b6d5c85905ba58f39b3991cbe2f48eaae470",
+      "retrieved_at": "2026-05-18T13:03:05.050644+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/valgla_vooluvesi/valgla_vooluvesiPolygon.shp"
+    },
+    {
+      "name": "dtm_5m",
+      "source_url": "https://geoportaal.maaamet.ee/est/Ruumiandmed/Korgusandmed/Laadi-korgusandmed-alla-p614.html",
+      "sha256": "2c372d1bcc6b89895a584db3f35da9fbfbc6a7686cb635ff40d625219e56bc71",
+      "retrieved_at": "2026-05-18T13:03:08.516919+00:00",
+      "crs": "unknown",
+      "resolution_m": null,
+      "output_path": "data/raw/DTM_5m_eesti.tif"
+    }
+  ],
   "placeholders": {
     "q_bar_k": {
       "in_use": true,

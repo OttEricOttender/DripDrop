@@ -77,52 +77,56 @@ DEM_NODATA = np.float32(-9999.0)
 # Official Estonian dataset registry.  Source URLs are confirmed from the
 # original project brief (docs/decisions.md) and the design document at
 # https://docs.google.com/document/d/1B9gXAdswT313_XtYV5t-ObUsj-CzwUuRyM8Yqh88_5g
-DATASETS: dict[str, dict[str, str]] = {
+# Mapping from logical dataset name → actual path within data/raw/ as delivered
+# by the Estonian portals. The portal downloads shapefiles into subdirectories
+# named after the layer, so filename may include a subdirectory component.
+# Entries with "optional": True are skipped gracefully if the file is absent.
+DATASETS: dict[str, dict] = {
     "vooluveekogud": {
-        # All watercourses (rivers, streams) — used for nearest-watercourse snap
+        # All watercourse segments — used for nearest-stream snap (Step 3).
+        # Columns used: kr_kood (→kood), nimi, tyyp, pikk_arv (→pikkus).
         "source": "https://register.keskkonnaportaal.ee/register",
         "portal_path": "Vesi > Veekogud > Vooluveekogud",
-        "filename": "vooluveekogud.shp",
+        "filename": "kr_vooluvesi/kr_vooluvesiLine.shp",
     },
     "vooluveekogumid": {
-        # Watercourse bodies = peajõed (main rivers) — thicker line weight in UI
-        # Distinct from vooluveekogud: these are the named main-river bodies,
-        # not every individual stream segment.
+        # Water body segments (peajõed) — LineString in real data.
+        # is_peajogi flag set via attribute join on kood, not spatial join.
         "source": "https://register.keskkonnaportaal.ee/register",
         "portal_path": "Vesi > Veekogumid > Vooluveekogumid",
-        "filename": "vooluveekogumid.shp",
+        "filename": "kr_vooluvesi_kogum/kr_vooluvesi_kogumLine.shp",
     },
-    "seisuveekogud": {
-        # Lakes and sea areas — displayed on the base map
+    "jarv": {
+        # Lakes — combined with mereala into lakes.fgb for map display (Step 3e).
         "source": "https://register.keskkonnaportaal.ee/register",
-        "portal_path": "Vesi > Veekogud > Järved, Merealad",
-        "filename": "seisuveekogud.shp",
+        "portal_path": "Vesi > Veekogud > Järved",
+        "filename": "kr_jarv/kr_jarvPolygon.shp",
+        "optional": True,
+    },
+    "mereala": {
+        # Sea areas — combined with jarv into lakes.fgb for map display (Step 3e).
+        "source": "https://register.keskkonnaportaal.ee/register",
+        "portal_path": "Vesi > Veekogud > Merealad",
+        "filename": "kr_mereala/kr_merealaPolygon.shp",
+        "optional": True,
     },
     "valglad": {
-        # Official watershed polygons — clip extents for per-valgla DEM tiles
+        # Official watershed polygons — clip extents for per-valgla DEM tiles.
+        # KKR code column is 'kood' in the actual download.
         "source": "https://register.keskkonnaportaal.ee/register",
         "portal_path": "Vesi > Vesikonnad ja valgalad > Vooluveekogude valglad",
-        "filename": "valglad.shp",
+        "filename": "valgla_vooluvesi/valgla_vooluvesiPolygon.shp",
     },
     "dtm_5m": {
-        # National 5 m DTM — the single authoritative elevation source
+        # National 5 m DTM — the single authoritative elevation source.
         "source": "https://geoportaal.maaamet.ee/est/Ruumiandmed/Korgusandmed/Laadi-korgusandmed-alla-p614.html",
         "portal_path": "Maapinna kõrgusmudelid > Kogu Eesti DTM eraldusvõimega 5m (GeoTIFF)",
         "filename": "DTM_5m_eesti.tif",
     },
-    "maaparandus": {
-        # Land-improvement system influence zones
-        "source": "https://geoportaal.maaamet.ee/est/Ruumiandmed/Kitsenduste-andmed/Kitsenduste-andmete-allalaadimine-p624.html",
-        "portal_path": "Maaparandussüsteemide mõjualad (SHP)",
-        "filename": "maaparandus.shp",
-    },
-    "q95": {
-        # Joon 4.1 cartogram — q_95% annual minimum flow modulus
-        # Provided by user as TopoToR_JOON41.tif
-        "source": "user-provided",
-        "portal_path": "keskmine_aasta_minimaalne_äravool/TopoToR_JOON41.tif",
-        "filename": "q95.tif",
-    },
+    # maaparandus removed: pipeline uses 20260517-msr_vork_shp/msr_vork.shp
+    #   via the --msr-vork-path CLI argument instead.
+    # q95 removed: TopoToR_JOON41.tif not yet integrated; placeholder (2.0 l/s/km²)
+    #   is in use via HYDROCALC_Q95_RASTER_PATH / config.q95_placeholder_l_per_s_km2.
 }
 
 # ETAK kolvikud is distributed as one shapefile per ETAK category inside this
@@ -561,23 +565,24 @@ def build_river_index(
             "Run reproject_to_lest97() first."
         )
 
+    # Rename portal column names to the stable schema that snap_to_stream reads.
+    rivers = rivers.rename(columns={"kr_kood": "kood", "pikk_arv": "pikkus"})
+
+    # Mark peajõed via attribute join on the KKR code.
+    # The real vooluveekogumid dataset is LineString (not Polygon), so a spatial
+    # join is not applicable.  Each vooluveekogud segment carries kood = the KKR
+    # code of the water body it belongs to; vooluveekogumid rows are the body-level
+    # records with the same kood.  A segment is a peajõgi if its kood appears in
+    # the body table.
     if len(bodies) == 0:
-        # No vooluveekogumid polygons → every segment is a lisajõgi
-        rivers = rivers.copy()
         rivers["is_peajogi"] = False
     else:
-        # Spatial join: find which river segments intersect a body polygon.
-        # predicate='intersects' handles both point-on-boundary and overlap cases.
-        # how='left' keeps all river segments even if they match nothing.
-        joined = gpd.sjoin(rivers, bodies[["geometry"]], how="left", predicate="intersects")
+        kogum_koods = set(bodies["kood"].dropna().astype(str))
+        rivers["is_peajogi"] = rivers["kood"].astype(str).isin(kogum_koods)
 
-        # sjoin may produce multiple rows per river segment when a segment
-        # intersects more than one polygon.  Take the first match per segment.
-        matched_indices = set(
-            joined.dropna(subset=["index_right"]).index.tolist()
-        )
-        rivers = rivers.copy()
-        rivers["is_peajogi"] = rivers.index.isin(matched_indices)
+    # Keep only the columns that snap_to_stream reads; discard the rest.
+    keep = [c for c in ("kood", "nimi", "tyyp", "pikkus", "is_peajogi") if c in rivers.columns]
+    rivers = rivers[keep + ["geometry"]]
 
     out_path = output_dir / "rivers.fgb"
     rivers.to_file(out_path, driver="FlatGeobuf")
@@ -929,9 +934,15 @@ def main() -> None:
     # ------------------------------------------------------------------
     logger.info("Step 1: Verifying dataset checksums ...")
     raw_paths: dict[str, Path] = {}
-    for name in DATASETS:
-        raw_paths[name] = download_dataset(name, data_dir, manifest_path=manifest_path)
-        logger.info("  OK: %s", name)
+    for name, info in DATASETS.items():
+        try:
+            raw_paths[name] = download_dataset(name, data_dir, manifest_path=manifest_path)
+            logger.info("  OK: %s", name)
+        except FileNotFoundError as exc:
+            if info.get("optional"):
+                logger.warning("  SKIP (optional): %s — %s", name, exc)
+            else:
+                raise
 
     # ------------------------------------------------------------------
     # Step 2 — reproject all inputs to EPSG:3301
@@ -971,7 +982,7 @@ def main() -> None:
     # Auto-detect the KKR code column from common Estonian GIS field names
     kkr_col = args.kkr_col
     if kkr_col is None:
-        for candidate in ("VEE_kood", "KKR_kood", "kkr_kood", "kkr", "id"):
+        for candidate in ("VEE_kood", "KKR_kood", "kkr_kood", "kkr", "kood", "id"):
             if candidate in valglad_gdf.columns:
                 kkr_col = candidate
                 break
@@ -1018,6 +1029,26 @@ def main() -> None:
         msr_gdf = gpd.read_file(args.msr_vork_path).to_crs(epsg=3301)
         msr_gdf.to_file(msr_vork_fgb, driver="FlatGeobuf")
         logger.info("  msr_vork.fgb written (%d polygons)", len(msr_gdf))
+
+    # ------------------------------------------------------------------
+    # Step 3e — optional lake index (jarv + mereala → lakes.fgb)
+    # ------------------------------------------------------------------
+    lakes_fgb = preprocessed_dir / "lakes.fgb"
+    if lakes_fgb.exists() and not force:
+        logger.info("Step 3e: lakes.fgb exists — skipping (pass --force to rebuild)")
+    elif "jarv" in lest97_paths and "mereala" in lest97_paths:
+        logger.info("Step 3e: Building lake index from jarv + mereala ...")
+        lakes = gpd.GeoDataFrame(
+            pd.concat(
+                [gpd.read_file(lest97_paths["jarv"]), gpd.read_file(lest97_paths["mereala"])],
+                ignore_index=True,
+            ),
+            crs="EPSG:3301",
+        )
+        lakes.to_file(lakes_fgb, driver="FlatGeobuf")
+        logger.info("  lakes.fgb written (%d polygons)", len(lakes))
+    else:
+        logger.info("Step 3e: jarv/mereala not downloaded — skipping lakes.fgb")
 
     # ------------------------------------------------------------------
     # Steps 4–6 — per-valgla DEM clip, flow grids, stream vectorisation

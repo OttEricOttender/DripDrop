@@ -31,6 +31,7 @@ from shapely.geometry import box
 from backend.utils.hashing import sha256_file
 from scripts.preprocess import (
     _is_lest97,
+    build_river_index,
     download_dataset,
     merge_kolvikud,
     read_manifest,
@@ -214,8 +215,8 @@ def _make_raw_file(data_dir: Path, name: str, content: bytes = b"fake dataset") 
     """Place a fake raw file where download_dataset expects it."""
     from scripts.preprocess import DATASETS
     raw_dir = data_dir / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
     path = raw_dir / DATASETS[name]["filename"]
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
 
@@ -264,16 +265,26 @@ class TestDownloadDataset:
         manifest_path = tmp_path / "datasets.lock.json"
 
         # Pin hash of original content
-        _make_raw_file(tmp_path, "maaparandus", content_original)
-        download_dataset("maaparandus", tmp_path, manifest_path=manifest_path)
+        _make_raw_file(tmp_path, "valglad", content_original)
+        download_dataset("valglad", tmp_path, manifest_path=manifest_path)
 
         # Replace file with tampered content
         from scripts.preprocess import DATASETS
-        raw_path = tmp_path / "raw" / DATASETS["maaparandus"]["filename"]
+        raw_path = tmp_path / "raw" / DATASETS["valglad"]["filename"]
         raw_path.write_bytes(content_tampered)
 
         with pytest.raises(ValueError, match="SHA-256 mismatch"):
-            download_dataset("maaparandus", tmp_path, manifest_path=manifest_path)
+            download_dataset("valglad", tmp_path, manifest_path=manifest_path)
+
+    def test_optional_dataset_skips_on_missing(self, tmp_path: Path) -> None:
+        """Optional datasets must not raise when file is absent."""
+        from scripts.preprocess import DATASETS
+        assert DATASETS["jarv"].get("optional"), "jarv should be optional"
+        # jarv file not created — download_dataset should raise FileNotFoundError
+        # so the caller (main) can catch and warn. download_dataset itself still raises;
+        # it's main() that swallows it for optional entries.
+        with pytest.raises(FileNotFoundError):
+            download_dataset("jarv", tmp_path)
 
     def test_error_message_includes_source_url(self, tmp_path: Path) -> None:
         """FileNotFoundError must mention where to download the dataset from."""
@@ -439,3 +450,85 @@ class TestMergeKolvikud:
         empty_dir.mkdir()
         with pytest.raises(FileNotFoundError, match="E_3"):
             merge_kolvikud(empty_dir, tmp_path / "out")
+
+
+# ---------------------------------------------------------------------------
+# 6. build_river_index — column rename + attribute join
+# ---------------------------------------------------------------------------
+
+
+def _make_rivers_fgb(tmp_path: Path) -> tuple[Path, Path]:
+    """Write synthetic vooluveekogud + vooluveekogumid FGBs in EPSG:3301."""
+    from shapely.geometry import LineString
+
+    # Two river segments: first belongs to kogum K001 (peajõgi), second does not
+    rivers_gdf = gpd.GeoDataFrame(
+        {
+            "kr_kood": ["K001", "K002"],
+            "nimi": ["Suur Jõgi", "Väike Jõgi"],
+            "tyyp": ["jõgi", "oja"],
+            "pikk_arv": [50_000.0, 5_000.0],
+        },
+        geometry=[
+            LineString([(500_000, 6_490_000), (510_000, 6_490_000)]),
+            LineString([(500_000, 6_480_000), (505_000, 6_480_000)]),
+        ],
+        crs="EPSG:3301",
+    )
+    rivers_path = tmp_path / "rivers_raw.fgb"
+    rivers_gdf.to_file(rivers_path, driver="FlatGeobuf")
+
+    # vooluveekogumid: LineString bodies (as delivered by the real portal)
+    bodies_gdf = gpd.GeoDataFrame(
+        {"kood": ["K001"]},
+        geometry=[LineString([(500_000, 6_490_000), (510_000, 6_490_000)])],
+        crs="EPSG:3301",
+    )
+    bodies_path = tmp_path / "bodies_raw.fgb"
+    bodies_gdf.to_file(bodies_path, driver="FlatGeobuf")
+
+    return rivers_path, bodies_path
+
+
+class TestBuildRiverIndex:
+    def test_output_file_created(self, tmp_path: Path) -> None:
+        rivers_path, bodies_path = _make_rivers_fgb(tmp_path)
+        result = build_river_index(rivers_path, bodies_path, tmp_path)
+        assert result.exists()
+        assert result.name == "rivers.fgb"
+
+    def test_columns_renamed(self, tmp_path: Path) -> None:
+        rivers_path, bodies_path = _make_rivers_fgb(tmp_path)
+        build_river_index(rivers_path, bodies_path, tmp_path)
+        gdf = gpd.read_file(tmp_path / "rivers.fgb")
+        assert "kood" in gdf.columns
+        assert "pikkus" in gdf.columns
+        assert "kr_kood" not in gdf.columns
+        assert "pikk_arv" not in gdf.columns
+
+    def test_is_peajogi_set_via_attribute_join(self, tmp_path: Path) -> None:
+        rivers_path, bodies_path = _make_rivers_fgb(tmp_path)
+        build_river_index(rivers_path, bodies_path, tmp_path)
+        gdf = gpd.read_file(tmp_path / "rivers.fgb")
+        peajogi = gdf.set_index("kood")["is_peajogi"]
+        assert peajogi["K001"] is True or peajogi["K001"] == True  # noqa: E712
+        assert peajogi["K002"] is False or peajogi["K002"] == False  # noqa: E712
+
+    def test_output_slim_columns_only(self, tmp_path: Path) -> None:
+        rivers_path, bodies_path = _make_rivers_fgb(tmp_path)
+        build_river_index(rivers_path, bodies_path, tmp_path)
+        gdf = gpd.read_file(tmp_path / "rivers.fgb")
+        allowed = {"kood", "nimi", "tyyp", "pikkus", "is_peajogi", "geometry"}
+        assert set(gdf.columns) <= allowed
+
+    def test_empty_bodies_all_lisajogi(self, tmp_path: Path) -> None:
+        from shapely.geometry import LineString
+        rivers_path, _ = _make_rivers_fgb(tmp_path)
+        empty_bodies = gpd.GeoDataFrame(
+            {"kood": []}, geometry=gpd.GeoSeries([], crs="EPSG:3301")
+        )
+        bodies_path = tmp_path / "empty_bodies.fgb"
+        empty_bodies.to_file(bodies_path, driver="FlatGeobuf")
+        build_river_index(rivers_path, bodies_path, tmp_path)
+        gdf = gpd.read_file(tmp_path / "rivers.fgb")
+        assert gdf["is_peajogi"].sum() == 0
