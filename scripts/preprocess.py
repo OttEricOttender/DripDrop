@@ -74,6 +74,12 @@ LEST97 = CRS.from_epsg(3301)
 # Nodata sentinel for all DEM rasters (must be float32 for pysheds 0.4).
 DEM_NODATA = np.float32(-9999.0)
 
+# Maximum stream-cell count before vectorize_streams bails out and writes an
+# empty FlatGeoBuf.  streams.fgb is NOT used by the Phase 3 runtime (snap uses
+# rivers.fgb); this guard just prevents OOM / multi-hour hangs on large basins
+# (e.g. Pärnu ~42M, Narva >>42M cells at threshold 500).
+MAX_STREAM_CELLS = 10_000_000
+
 # Official Estonian dataset registry.  Source URLs are confirmed from the
 # original project brief (docs/decisions.md) and the design document at
 # https://docs.google.com/document/d/1B9gXAdswT313_XtYV5t-ObUsj-CzwUuRyM8Yqh88_5g
@@ -488,6 +494,19 @@ def vectorize_streams(
         stream_mask = (acc >= threshold) & (acc != float(nodata))
     else:
         stream_mask = acc >= threshold
+
+    stream_cell_count = int(stream_mask.sum())
+    if stream_cell_count > MAX_STREAM_CELLS:
+        # streams.fgb is not consumed by the Phase 3 runtime (snap uses
+        # rivers.fgb).  Writing an empty file is safer than an OOM hang.
+        logger.warning(
+            "vectorize_streams %s: %d stream cells exceeds limit %d; "
+            "writing empty FlatGeoBuf to avoid OOM",
+            kkr_code, stream_cell_count, MAX_STREAM_CELLS,
+        )
+        gdf = gpd.GeoDataFrame({"kkr_code": []}, geometry=gpd.GeoSeries([], crs=LEST97), crs=LEST97)
+        gdf.to_file(out_path, driver="FlatGeobuf")
+        return out_path
 
     # rasterio.features.shapes groups connected stream pixels into polygons;
     # taking each polygon's exterior gives a line representation of the stream
@@ -980,6 +999,12 @@ def main() -> None:
         default=1,
         help="Parallel worker processes for per-valgla DEM pipeline (default: 1 = sequential)",
     )
+    parser.add_argument(
+        "--kkr-filter",
+        default=None,
+        help="Comma-separated KKR codes to process (e.g. VEE1106900,VEE1107000). "
+             "All others are skipped.  Useful for reprocessing specific failed valglad.",
+    )
     args = parser.parse_args()
 
     data_dir: Path = args.data_dir
@@ -1133,12 +1158,24 @@ def main() -> None:
     dem_path = lest97_paths["dtm_5m"]
     streams_dir = preprocessed_dir / "streams"
 
+    # Optional KKR filter — reprocess specific valglad only.
+    kkr_filter: set[str] | None = None
+    if args.kkr_filter:
+        kkr_filter = {k.strip() for k in args.kkr_filter.split(",") if k.strip()}
+        logger.info("--kkr-filter: only processing %d valglad: %s", len(kkr_filter), sorted(kkr_filter))
+
     # Sort ascending by area so small basins run first; large basins (memory hogs)
     # run last when fewer workers compete for RAM.
     valglad_sorted = valglad_gdf.copy()
     valglad_sorted["_area"] = valglad_sorted.geometry.area
     valglad_sorted = valglad_sorted.sort_values("_area")
-    rows = [(str(row[kkr_col]), row.geometry) for _, row in valglad_sorted.iterrows()]
+    rows = [
+        (str(row[kkr_col]), row.geometry)
+        for _, row in valglad_sorted.iterrows()
+        if kkr_filter is None or str(row[kkr_col]) in kkr_filter
+    ]
+    if kkr_filter:
+        logger.info("  %d valglad matched the filter (out of %d total)", len(rows), len(valglad_gdf))
     worker_kwargs: dict = dict(
         dem_path=dem_path,
         preprocessed_dir=preprocessed_dir,
@@ -1148,25 +1185,27 @@ def main() -> None:
         force=force,
     )
 
-    if args.workers == 1:
-        for kkr_code, geom in rows:
-            _process_one_valgla(kkr_code, geom, **worker_kwargs)
-    else:
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        with ProcessPoolExecutor(max_workers=args.workers) as executor:
-            futures = {
-                executor.submit(_process_one_valgla, kc, geom, **worker_kwargs): kc
-                for kc, geom in rows
-            }
-            done = 0
-            for future in as_completed(futures):
-                done += 1
-                kc = futures[future]
-                try:
-                    future.result()
-                    logger.info("  [%d/%d done] %s", done, len(rows), kc)
-                except Exception as exc:
-                    logger.error("  [%d/%d FAILED] %s: %s", done, len(rows), kc, exc)
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    # max_tasks_per_child=1 restarts the worker subprocess after every valgla,
+    # guaranteeing that pysheds memory is fully released before the next one
+    # starts.  This is critical for the largest catchments (Narva, Emajõgi)
+    # where a single D8 run can temporarily occupy >8 GB of address space.
+    n_workers = args.workers
+    with ProcessPoolExecutor(max_workers=n_workers, max_tasks_per_child=1) as executor:
+        futures = {
+            executor.submit(_process_one_valgla, kc, geom, **worker_kwargs): kc
+            for kc, geom in rows
+        }
+        done = 0
+        for future in as_completed(futures):
+            done += 1
+            kc = futures[future]
+            try:
+                future.result()
+                logger.info("  [%d/%d done] %s", done, len(rows), kc)
+            except Exception as exc:
+                logger.error("  [%d/%d FAILED] %s: %s", done, len(rows), kc, exc)
 
     # ------------------------------------------------------------------
     # Step 7 — emit final manifest with updated timestamp
