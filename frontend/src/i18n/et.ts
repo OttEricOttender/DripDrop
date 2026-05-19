@@ -72,6 +72,11 @@ const et: Record<string, string> = {
   unitLsKm2: 'l/(s·km²)',
   unitPct: '%',
 
+  // PDF
+  downloadPdf: 'Lae PDF alla',
+  downloadPdfLoading: 'Genereerin PDF…',
+  downloadPdfError: 'PDF genereerimine ebaõnnestus.',
+
   // Status / errors
   loading: 'Arvutan…',
   errorGeneric: 'Viga analüüsi käivitamisel.',

@@ -61,6 +61,10 @@ const en: Record<string, string> = {
   unitLsKm2: 'l/(s·km²)',
   unitPct: '%',
 
+  downloadPdf: 'Download PDF',
+  downloadPdfLoading: 'Generating PDF…',
+  downloadPdfError: 'PDF generation failed.',
+
   loading: 'Calculating…',
   errorGeneric: 'Error running analysis.',
 }

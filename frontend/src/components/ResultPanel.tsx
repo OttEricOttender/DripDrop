@@ -7,6 +7,33 @@ interface Props {
   result: AnalysisResult
 }
 
+async function downloadPdfReport(result: AnalysisResult): Promise<void> {
+  const resp = await fetch('/api/report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(result),
+  })
+  if (!resp.ok) {
+    let detail = resp.statusText
+    try {
+      const body = await resp.json() as { detail?: string }
+      if (body.detail) detail = body.detail
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const cd = resp.headers.get('Content-Disposition') ?? ''
+  const match = cd.match(/filename="([^"]+)"/)
+  a.href = url
+  a.download = match ? match[1] : `hydrocalc_${result.run_id.slice(0, 8)}.pdf`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true)
   return (
@@ -35,6 +62,20 @@ function Row({ label, value }: { label: string; value: string }) {
 export default function ResultPanel({ result }: Props) {
   const { t } = useT()
   const h = result.hommik
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
+
+  async function handleDownloadPdf() {
+    setPdfLoading(true)
+    setPdfError(null)
+    try {
+      await downloadPdfReport(result)
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : t('downloadPdfError'))
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-2">
@@ -58,6 +99,17 @@ export default function ResultPanel({ result }: Props) {
         <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
           {t('areaFloored')}
         </p>
+      )}
+
+      <button
+        onClick={handleDownloadPdf}
+        disabled={pdfLoading}
+        className="w-full py-2 text-sm font-semibold rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {pdfLoading ? t('downloadPdfLoading') : t('downloadPdf')}
+      </button>
+      {pdfError && (
+        <p className="text-xs text-red-700 bg-red-50 px-2 py-1 rounded">{pdfError}</p>
       )}
 
       <Section title={t('riverSection')}>
