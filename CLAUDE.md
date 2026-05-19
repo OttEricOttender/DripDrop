@@ -38,11 +38,11 @@ docker compose up
 |---|-------|--------|
 | 0 | Foundation (FastAPI scaffold, pytest, datasets manifest, Docker) | **complete** |
 | 1 | Karl Hommik calculator (formulas 1.1–1.8, 28 tests, live API) | **complete** |
-| 2 | Offline GIS preprocessing (`scripts/preprocess.py`) | **next** |
-| 3 | FastAPI runtime (snap → catchment → landcover → maaparandus → Hommik) | pending |
-| 4 | React + TS + Vite + Leaflet + Tailwind frontend | pending |
-| 5 | PDF report matching `TÜ_pdf_vorm.pdf` | pending |
-| 6 | Docker hardening, CI, reproducibility tests, docs | pending |
+| 2 | Offline GIS preprocessing (`scripts/preprocess.py`) | **complete** (2909/2910 valglad; Narva VEE1062200 requires >25 GB RAM) |
+| 3 | FastAPI runtime (snap → catchment → landcover → maaparandus → Hommik) | **complete** |
+| 4 | React + TS + Vite + Leaflet + Tailwind frontend | **complete** |
+| 5 | PDF report matching `TÜ_pdf_vorm.pdf` | **complete** (`POST /api/report` + "Lae PDF alla" button) |
+| 6 | Docker hardening, CI, reproducibility tests, docs | **next** |
 
 Detailed task descriptions, including the *why* behind each phase, are in
 `HANDOFF.md`.
