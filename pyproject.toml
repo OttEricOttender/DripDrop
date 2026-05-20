@@ -64,6 +64,8 @@ ignore_errors = true
 minversion = "8.0"
 testpaths = ["tests", "backend"]
 addopts = "-ra -q --strict-markers --strict-config"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "error",
     # rasterio/pyproj emit benign deprecation warnings on some platforms

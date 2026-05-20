@@ -1,0 +1,28 @@
+# Version control
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Heavy data — the preprocessed volume is mounted at runtime, never baked in.
+data/preprocessed/
+data/raw/
+
+# Frontend (not needed in the backend image)
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Docs + tooling
+Documentation/
+output/
+*.DS_Store
+*.pdf
+.env

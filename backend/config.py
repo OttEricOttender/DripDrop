@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     q95_placeholder_l_per_s_km2: float = 2.0
     q95_raster_path: Path | None = None  # set via HYDROCALC_Q95_RASTER_PATH
 
+    # ---- CORS -----------------------------------------------------------
+    # Comma-separated list of allowed origins for CORSMiddleware.
+    # Defaults to "*" for local dev; tighten via HYDROCALC_ALLOWED_ORIGINS
+    # in production (e.g. "https://svam.ee,https://www.svam.ee").
+    allowed_origins: str = Field(
+        default="*",
+        description="Comma-separated CORS allowed origins, or '*' for dev.",
+    )
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
     # ---- Feature flags --------------------------------------------------
     enable_legacy_flask: bool = Field(
         default=True,

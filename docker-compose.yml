@@ -65,9 +65,10 @@ services:
     env_file:
       - db.env
     environment:
-      # Make Pydantic Settings pick these up; defaults already point inside /hydro.
       HYDROCALC_DATA_DIR: /hydro/data
       HYDROCALC_PREPROCESSED_DIR: /hydro/data/preprocessed
+      # Restrict CORS to the frontend origin in the compose stack.
+      HYDROCALC_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:80
     volumes:
       - ./backend:/hydro/backend
       - ./data:/hydro/data
@@ -84,12 +85,12 @@ services:
       retries: 5
       timeout: 5s
 
-  # ---- React + Vite frontend (Phase 4) -------------------------------------
-  frontend-service:
+  # ---- React + Vite frontend (dev hot-reload) ------------------------------
+  frontend-dev:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    container_name: hydrocalc-frontend
+    container_name: hydrocalc-frontend-dev
     environment:
       VITE_API_BASE_URL: http://backend-service:8000
     volumes:
@@ -99,6 +100,21 @@ services:
       - "5173:5173"
     depends_on:
       - backend-service
+    profiles:
+      - dev
+
+  # ---- React + Vite frontend (production nginx) ----------------------------
+  frontend-service:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hydrocalc-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend-service
+    profiles:
+      - prod
 
 volumes:
   hydro_preprocessed:

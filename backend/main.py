@@ -60,10 +60,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — the React frontend runs on a separate origin in dev.
+    settings = get_settings()
+    # CORS — origins controlled via HYDROCALC_ALLOWED_ORIGINS env var.
+    # Defaults to "*" for local dev; set to specific origins in production.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],          # tightened per-environment in Phase 6
+        allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
