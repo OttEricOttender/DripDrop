@@ -42,7 +42,7 @@ docker compose up
 | 3 | FastAPI runtime (snap → catchment → landcover → maaparandus → Hommik) | **complete** |
 | 4 | React + TS + Vite + Leaflet + Tailwind frontend | **complete** |
 | 5 | PDF report matching `TÜ_pdf_vorm.pdf` | **complete** (`POST /api/report` + "Lae PDF alla" button) |
-| 6 | Docker hardening, CI, reproducibility tests, docs | **next** |
+| 6 | Docker hardening, CI, reproducibility tests, docs | **complete** |
 
 Detailed task descriptions, including the *why* behind each phase, are in
 `HANDOFF.md`.
