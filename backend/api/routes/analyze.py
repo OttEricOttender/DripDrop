@@ -105,7 +105,7 @@ async def analyze(
 
     # --- 4. Delineate catchment ------------------------------------------
     try:
-        catchment_poly, area_km2 = watershed.delineate_catchment(
+        catchment_poly, area_km2, dem_resolution_m = watershed.delineate_catchment(
             x_snap, y_snap, kkr_code, pre
         )
     except FileNotFoundError as exc:
@@ -119,7 +119,14 @@ async def analyze(
             detail=str(exc),
         )
 
-    catchment_info = CatchmentInfo(code=kkr_code, area_km2=area_km2)
+    catchment_info = CatchmentInfo(code=kkr_code, area_km2=area_km2, dem_resolution_m=dem_resolution_m)
+
+    if dem_resolution_m > 5:
+        warnings.append(
+            f"DEM preprocessed at {dem_resolution_m} m resolution "
+            f"(basin too large for 5 m; memory limit). "
+            f"Hydrological results are indicative only and not legally defensible."
+        )
 
     # --- 5. Land-cover breakdown -----------------------------------------
     kolvikud_fgb = pre / "kolvikud.fgb"

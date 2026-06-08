@@ -38,6 +38,7 @@ export interface CatchmentInfo {
   code: string | null
   name: string | null
   area_km2: number
+  dem_resolution_m: number
 }
 
 export interface HommikResult {

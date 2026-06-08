@@ -93,7 +93,7 @@ def _patch_all(pre: Path):
         ),
         patch(
             "backend.api.routes.analyze.watershed.delineate_catchment",
-            return_value=(_CATCHMENT_POLY, _CATCHMENT_AREA_KM2),
+            return_value=(_CATCHMENT_POLY, _CATCHMENT_AREA_KM2, 5),
         ),
         patch(
             "backend.api.routes.analyze.landcover.compute_landcover",
@@ -248,6 +248,36 @@ class TestAnalyzeEndpoint:
         data = resp.json()
         assert data["river"]["code"] == "VEE-001"
         assert data["river"]["name"] == "Suur Jõgi"
+
+    def test_catchment_dem_resolution_default_5m(self, tmp_path: Path) -> None:
+        client, pre = _make_client_with_rivers(tmp_path)
+        patches = _patch_all(pre)
+        with _apply_patches(patches):
+            resp = client.post(
+                "/api/analyze",
+                json={"point_lest97": {"x": 505_000.0, "y": 6_500_000.0}},
+            )
+        data = resp.json()
+        assert data["catchment"]["dem_resolution_m"] == 5
+
+    def test_low_res_dem_adds_warning(self, tmp_path: Path) -> None:
+        """A 25 m DEM (large-basin fallback) must produce a resolution warning."""
+        client, pre = _make_client_with_rivers(tmp_path)
+        low_res_patches = [
+            patch(
+                "backend.api.routes.analyze.watershed.delineate_catchment",
+                return_value=(_CATCHMENT_POLY, _CATCHMENT_AREA_KM2, 25),
+            ),
+        ] + [p for p in _patch_all(pre) if p.attribute != "delineate_catchment"]
+        with _apply_patches(low_res_patches):
+            resp = client.post(
+                "/api/analyze",
+                json={"point_lest97": {"x": 505_000.0, "y": 6_500_000.0}},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["catchment"]["dem_resolution_m"] == 25
+        assert any("25 m" in w for w in data["warnings"])
 
 
 # ---------------------------------------------------------------------------

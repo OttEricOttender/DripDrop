@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Droplets } from 'lucide-react'
 import { LanguageContext, makeT, type Lang } from './i18n'
 import MapView from './components/MapView'
 import CoordInput from './components/CoordInput'
@@ -30,15 +31,19 @@ export default function App() {
   return (
     <LanguageContext.Provider value={{ lang, setLang, t }}>
       <div className="flex flex-col" style={{ height: '100vh' }}>
+
         {/* ── Header ─────────────────────────────────────────────── */}
-        <header className="bg-blue-900 text-white px-4 py-2 flex items-center justify-between shrink-0">
-          <div className="flex items-baseline gap-2">
-            <span className="font-bold text-lg">{t('appTitle')}</span>
-            <span className="text-blue-300 text-sm hidden sm:inline">{t('appSubtitle')}</span>
+        <header className="bg-gradient-to-r from-blue-950 to-blue-800 text-white px-5 py-3 flex items-center justify-between shrink-0 shadow-md">
+          <div className="flex items-center gap-3">
+            <Droplets className="w-6 h-6 text-blue-300" strokeWidth={1.75} />
+            <div className="flex items-baseline gap-2.5">
+              <span className="font-bold text-lg tracking-tight">{t('appTitle')}</span>
+              <span className="text-blue-300 text-sm hidden sm:inline opacity-90">{t('appSubtitle')}</span>
+            </div>
           </div>
           <button
             onClick={() => setLang(lang === 'et' ? 'en' : 'et')}
-            className="text-sm border border-blue-500 px-2 py-1 rounded hover:bg-blue-800 transition-colors"
+            className="text-xs font-semibold border border-blue-500/60 px-3 py-1.5 rounded-lg hover:bg-blue-700/50 hover:border-blue-400 transition-all"
             title="Toggle language / Vaheta keel"
           >
             {lang === 'et' ? 'EN' : 'ET'}
@@ -47,9 +52,10 @@ export default function App() {
 
         {/* ── Body ───────────────────────────────────────────────── */}
         <div className="flex flex-1 min-h-0">
+
           {/* Sidebar */}
-          <aside className="w-80 xl:w-96 bg-white shadow-xl flex flex-col overflow-y-auto shrink-0 z-10">
-            <div className="p-4 space-y-4">
+          <aside className="w-80 xl:w-96 bg-slate-50 border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 z-10">
+            <div className="p-4 space-y-3">
               <CoordInput
                 pendingPoint={pendingPoint}
                 onSubmit={handleRun}
@@ -58,7 +64,7 @@ export default function App() {
               <ProbabilitySelect value={p} onChange={setP} />
 
               {state.status === 'error' && (
-                <div className="bg-red-50 border border-red-300 text-red-800 rounded p-3 text-sm">
+                <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
                   {state.message}
                 </div>
               )}
@@ -86,18 +92,20 @@ export default function App() {
               result={result}
             />
             {!result && state.status !== 'loading' && (
-              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur px-4 py-2 rounded shadow text-sm text-gray-600 pointer-events-none">
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-4 py-2 rounded-full shadow-lg text-sm text-slate-500 pointer-events-none border border-slate-200">
                 {t('clickMapHint')}
               </div>
             )}
             {state.status === 'loading' && (
-              <div className="absolute inset-0 bg-white/30 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-                <div className="bg-white rounded-lg shadow px-6 py-3 text-blue-700 font-medium animate-pulse">
+              <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+                <div className="bg-white rounded-2xl shadow-xl px-8 py-4 text-blue-700 font-semibold flex items-center gap-3">
+                  <Droplets className="w-5 h-5 animate-pulse" />
                   {t('loading')}
                 </div>
               </div>
             )}
           </div>
+
         </div>
       </div>
     </LanguageContext.Provider>

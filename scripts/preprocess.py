@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,7 @@ from pysheds.grid import Grid
 from pysheds.sview import Raster
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.transform import from_origin
+from rasterio.transform import from_bounds, from_origin
 
 from backend.utils.hashing import sha256_file
 
@@ -79,6 +80,15 @@ DEM_NODATA = np.float32(-9999.0)
 # rivers.fgb); this guard just prevents OOM / multi-hour hangs on large basins
 # (e.g. Pärnu ~42M, Narva >>42M cells at threshold 500).
 MAX_STREAM_CELLS = 10_000_000
+
+# Auto-downsampling threshold for large-basin DEMs.  process_valgla() checks
+# the cell count of the clipped DEM before running the pysheds conditioning
+# chain; if it exceeds this value the DEM is resampled to
+# LARGE_DEM_TARGET_RESOLUTION_M first.  At 5 m resolution, Narva VEE1062200
+# has ~1.32B cells and peaks at ~25 GB RAM during fill_depressions().
+# At 25 m resolution the same basin drops to ~13M cells (~1.6 GB).
+LARGE_DEM_CELL_THRESHOLD = 500_000_000
+LARGE_DEM_TARGET_RESOLUTION_M = 25
 
 # Official Estonian dataset registry.  Source URLs are confirmed from the
 # original project brief (docs/decisions.md) and the design document at
@@ -307,6 +317,64 @@ def read_manifest(path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def resample_dem(src_path: Path, target_res_m: int) -> Path:
+    """Resample a DEM clip to a coarser resolution, replacing the file in-place.
+
+    Used for basins whose 5 m DEM exceeds LARGE_DEM_CELL_THRESHOLD (e.g.
+    Narva VEE1062200 at ~1.32B cells → ~25 GB RAM during fill_depressions).
+    Writes to a temporary sibling file then atomically replaces the source so
+    the caller always sees a single path.
+
+    Parameters
+    ----------
+    src_path : Path
+        Float32 DEM GeoTIFF in EPSG:3301 produced by clip_dem().
+    target_res_m : int
+        Target pixel size in metres.  Must be coarser than the source.
+        Returns src_path unchanged if target_res_m <= current resolution.
+
+    Returns
+    -------
+    Path
+        src_path (replaced in-place with the resampled raster).
+    """
+    with rasterio.open(src_path) as src:
+        src_res = abs(src.transform.a)
+        if target_res_m <= src_res:
+            return src_path
+
+        scale = src_res / target_res_m
+        new_width = max(1, int(src.width * scale))
+        new_height = max(1, int(src.height * scale))
+        orig_w, orig_h = src.width, src.height
+
+        new_transform = from_bounds(
+            src.bounds.left, src.bounds.bottom,
+            src.bounds.right, src.bounds.top,
+            new_width, new_height,
+        )
+
+        meta = src.meta.copy()
+        meta.update(width=new_width, height=new_height, transform=new_transform)
+
+        data = src.read(
+            out_shape=(1, new_height, new_width),
+            resampling=Resampling.average,
+        )
+
+    tmp_path = src_path.with_suffix(".resampled.tif")
+    with rasterio.open(tmp_path, "w", **meta) as dst:
+        dst.write(data)
+
+    shutil.move(str(tmp_path), str(src_path))
+    logger.info(
+        "resample_dem %s: %.0f m → %d m (%d×%d → %d×%d px)",
+        src_path.stem, src_res, target_res_m,
+        orig_w, orig_h, new_width, new_height,
+    )
+    return src_path
+
+
 def clip_dem(
     valgla_geom: Any,
     dem_path: Path,
@@ -406,6 +474,19 @@ def process_valgla(
     flowacc_dir = output_dir / "flowacc"
     flowdir_dir.mkdir(parents=True, exist_ok=True)
     flowacc_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-downsample oversized DEMs before running the pysheds conditioning
+    # chain.  fill_depressions() on Narva's ~1.32B-cell grid peaks at ~25 GB.
+    with rasterio.open(dem_clip_path) as _ds:
+        _ncells = _ds.width * _ds.height
+    if _ncells > LARGE_DEM_CELL_THRESHOLD:
+        logger.warning(
+            "process_valgla %s: DEM has %d cells (> %d threshold); "
+            "resampling to %d m to stay within memory budget. "
+            "Results for this basin are indicative only.",
+            kkr_code, _ncells, LARGE_DEM_CELL_THRESHOLD, LARGE_DEM_TARGET_RESOLUTION_M,
+        )
+        dem_clip_path = resample_dem(dem_clip_path, LARGE_DEM_TARGET_RESOLUTION_M)
 
     grid, dem = load_dem(dem_clip_path)
     conditioned = condition_dem(grid, dem)

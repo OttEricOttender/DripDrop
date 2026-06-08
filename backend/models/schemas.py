@@ -90,6 +90,11 @@ class CatchmentInfo(BaseModel):
     code: str | None = Field(None, description="Official Vooluveekogude valgla KKR code")
     name: str | None = None
     area_km2: float = Field(..., gt=0)
+    dem_resolution_m: int = Field(
+        5,
+        description="DEM pixel size used in preprocessing (m). >5 means the basin "
+                    "was auto-downsampled (e.g. Narva at 25 m) — results are indicative only.",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -118,14 +118,14 @@ class TestDelineateCatchment:
         # Point near the centre of the clipped DEM
         x_c = (550_050 + 550_450) / 2
         y_c = (6_489_600 + 6_489_950) / 2
-        poly, area_km2 = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
+        poly, area_km2, _ = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
         assert poly is not None
         assert area_km2 > 0.0
 
     def test_catchment_area_is_finite(self, flow_grids: Path) -> None:
         x_c = (550_050 + 550_450) / 2
         y_c = (6_489_600 + 6_489_950) / 2
-        _, area_km2 = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
+        _, area_km2, _ = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
         import math
         assert math.isfinite(area_km2)
 
@@ -133,7 +133,7 @@ class TestDelineateCatchment:
         """The 80×70 cell clipped DEM is 400×350 m → max area ≈ 0.14 km²."""
         x_c = (550_050 + 550_450) / 2
         y_c = (6_489_600 + 6_489_950) / 2
-        _, area_km2 = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
+        _, area_km2, _ = delineate_catchment(x_c, y_c, KKR_CODE, flow_grids)
         assert area_km2 <= 0.2, f"Area {area_km2:.4f} km² exceeds DEM extent"
 
     def test_raises_file_not_found_for_missing_flowdir(self, tmp_path: Path) -> None:

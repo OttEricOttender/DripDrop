@@ -37,7 +37,16 @@ from shapely.geometry import box
 
 import geopandas as gpd
 
-from scripts.preprocess import DIRMAP, DEM_NODATA, clip_dem, process_valgla, vectorize_streams
+from scripts.preprocess import (
+    DIRMAP,
+    DEM_NODATA,
+    LARGE_DEM_CELL_THRESHOLD,
+    LARGE_DEM_TARGET_RESOLUTION_M,
+    clip_dem,
+    process_valgla,
+    resample_dem,
+    vectorize_streams,
+)
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -268,3 +277,98 @@ class TestVectorizeStreams:
         new_dir = tmp_path / "streams" / "nested"
         result = vectorize_streams(flowacc, KKR_CODE, threshold=1, output_dir=new_dir)
         assert result.exists()
+
+
+# ---------------------------------------------------------------------------
+# resample_dem tests
+# ---------------------------------------------------------------------------
+
+
+class TestResampleDem:
+    """resample_dem() must reduce resolution and replace the file in-place."""
+
+    def test_resolution_decreases(self, clipped_dem: Path, tmp_path: Path) -> None:
+        """Output pixel size must equal target_res_m."""
+        import shutil
+        dest = tmp_path / "resample_test.tif"
+        shutil.copy(clipped_dem, dest)
+        resample_dem(dest, 25)
+        with rasterio.open(dest) as src:
+            assert abs(src.transform.a) == pytest.approx(25.0, abs=1.0)
+
+    def test_dimensions_shrink(self, clipped_dem: Path, tmp_path: Path) -> None:
+        """Width and height must be smaller after downsampling 5 m → 25 m."""
+        import shutil
+        dest = tmp_path / "resample_dims.tif"
+        shutil.copy(clipped_dem, dest)
+        with rasterio.open(dest) as src:
+            orig_w, orig_h = src.width, src.height
+        resample_dem(dest, 25)
+        with rasterio.open(dest) as src:
+            assert src.width < orig_w
+            assert src.height < orig_h
+
+    def test_crs_preserved(self, clipped_dem: Path, tmp_path: Path) -> None:
+        import shutil
+        dest = tmp_path / "resample_crs.tif"
+        shutil.copy(clipped_dem, dest)
+        resample_dem(dest, 25)
+        with rasterio.open(dest) as src:
+            assert src.crs.to_epsg() == 3301
+
+    def test_nodata_preserved(self, clipped_dem: Path, tmp_path: Path) -> None:
+        import shutil
+        dest = tmp_path / "resample_nodata.tif"
+        shutil.copy(clipped_dem, dest)
+        resample_dem(dest, 25)
+        with rasterio.open(dest) as src:
+            assert src.nodata == pytest.approx(float(DEM_NODATA))
+
+    def test_noop_when_target_finer_than_source(self, clipped_dem: Path, tmp_path: Path) -> None:
+        """Requesting a finer resolution must leave the file untouched."""
+        import shutil
+        dest = tmp_path / "resample_noop.tif"
+        shutil.copy(clipped_dem, dest)
+        with rasterio.open(dest) as src:
+            orig_w, orig_h = src.width, src.height
+        resample_dem(dest, 1)  # 1 m < 5 m — must be a no-op
+        with rasterio.open(dest) as src:
+            assert src.width == orig_w
+            assert src.height == orig_h
+
+
+# ---------------------------------------------------------------------------
+# Large-basin auto-resample integration
+# ---------------------------------------------------------------------------
+
+
+class TestLargeBasinAutoResample:
+    """process_valgla() must auto-resample when the DEM exceeds the cell threshold."""
+
+    def test_process_valgla_resamples_when_threshold_zero(
+        self, clipped_dem: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Setting threshold to 0 forces resampling on any DEM."""
+        import scripts.preprocess as pp
+        monkeypatch.setattr(pp, "LARGE_DEM_CELL_THRESHOLD", 0)
+
+        flowdir_path, flowacc_path = process_valgla(clipped_dem, KKR_CODE, tmp_path)
+
+        # The DEM was resampled to LARGE_DEM_TARGET_RESOLUTION_M before pysheds;
+        # the resulting flow grids must reflect that coarser pixel size.
+        with rasterio.open(flowdir_path) as src:
+            res = abs(src.transform.a)
+        assert res == pytest.approx(LARGE_DEM_TARGET_RESOLUTION_M, abs=1.0)
+
+    def test_process_valgla_skips_resample_when_threshold_high(
+        self, clipped_dem: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A very high threshold must leave the DEM at its original resolution."""
+        import scripts.preprocess as pp
+        monkeypatch.setattr(pp, "LARGE_DEM_CELL_THRESHOLD", 10_000_000_000)
+
+        flowdir_path, _ = process_valgla(clipped_dem, f"{KKR_CODE}_hires", tmp_path)
+
+        with rasterio.open(flowdir_path) as src:
+            res = abs(src.transform.a)
+        assert res == pytest.approx(5.0, abs=0.5)

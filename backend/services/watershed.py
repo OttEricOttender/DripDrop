@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import geopandas as gpd
+import rasterio
 import rasterio.features
 from pysheds.grid import Grid
 from shapely.geometry import Point, shape as shapely_shape
@@ -72,7 +73,7 @@ def delineate_catchment(
     y_snapped: float,
     kkr_code: str,
     preprocessed_dir: Path,
-) -> tuple[Any, float]:
+) -> tuple[Any, float, int]:
     """Delineate the catchment area upstream of a snapped pour point.
 
     Loads the per-valgla flow direction and flow accumulation rasters produced
@@ -95,6 +96,9 @@ def delineate_catchment(
         The delineated catchment boundary in EPSG:3301.
     area_km2 : float
         Catchment area in km².
+    dem_resolution_m : int
+        Pixel size of the flow grids in metres.  Normally 5; >5 means the basin
+        was auto-downsampled during preprocessing (e.g. Narva at 25 m).
 
     Raises
     ------
@@ -116,6 +120,9 @@ def delineate_catchment(
             f"Flow accumulation raster not found: {flowacc_path}. "
             f"Run scripts/preprocess.py to generate the per-valgla flow grids."
         )
+
+    with rasterio.open(flowdir_path) as _meta:
+        dem_resolution_m = int(round(abs(_meta.transform.a)))
 
     grid = Grid.from_raster(str(flowdir_path))
     fdir = grid.read_raster(str(flowdir_path))
@@ -149,4 +156,4 @@ def delineate_catchment(
     catchment_polygon = max(geoms, key=lambda g: g.area)
     area_km2 = catchment_polygon.area / 1e6
 
-    return catchment_polygon, area_km2
+    return catchment_polygon, area_km2, dem_resolution_m

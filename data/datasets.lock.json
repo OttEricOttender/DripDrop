@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "manifest_version": "0.0.0-phase0-scaffold",
-  "generated_at": null,
+  "generated_at": "2026-05-19T17:53:02.494758+00:00",
   "formula_revision": "TY-protsess-2024-v1",
   "notes": [
     "This file is populated by scripts/preprocess.py in Phase 2.",
