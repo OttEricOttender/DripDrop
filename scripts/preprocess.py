@@ -668,6 +668,20 @@ def build_river_index(
     # Rename portal column names to the stable schema that snap_to_stream reads.
     rivers = rivers.rename(columns={"kr_kood": "kood", "pikk_arv": "pikkus"})
 
+    # Some rivers have pikk_arv=0 or NaN in the source data (e.g. Nuutri jõgi).
+    # Fall back to the geometry length (EPSG:3301 metres) so the PDF report
+    # never displays "0.0 km".  The source unit for pikk_arv is metres, matching
+    # EPSG:3301 geometry.length — no conversion needed.
+    if "pikkus" in rivers.columns:
+        zero_mask = rivers["pikkus"].isna() | (rivers["pikkus"] == 0)
+        if zero_mask.any():
+            rivers.loc[zero_mask, "pikkus"] = rivers.loc[zero_mask].geometry.length
+            logger.info(
+                "build_river_index: %d segment(s) had pikk_arv=0/NaN — "
+                "length computed from geometry",
+                int(zero_mask.sum()),
+            )
+
     # Mark peajõed via attribute join.
     # The real vooluveekogumid dataset is LineString (not Polygon) so spatial
     # join is not applicable.  The kood schemes differ between the two layers:

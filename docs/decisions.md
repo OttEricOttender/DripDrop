@@ -172,8 +172,14 @@ practical approximation used historically by the project team.
 raised-bog contribution to r_s); request soil map data per catchment (correct
 but requires a data source not in scope); treat as a single "wetland" input
 (would require a formula revision).
-**Consequences:** Results flagged with warning "A_ms/A_r split uses 80/20
-legacy approximation" in AnalysisResult.warnings. The split is centralized in
-`backend/services/landcover.py` constants `_A_MS_FRACTION` / `_A_R_FRACTION`
-so it can be updated in one place if primary source data is found. Any change
-must bump `hommik_formula_revision` in `backend/config.py`.
+**Consequences:** The split is centralized in `backend/services/landcover.py`
+constants `_A_MS_FRACTION` / `_A_R_FRACTION` so it can be updated in one place
+if primary source data is found. Any change must bump `hommik_formula_revision`
+in `backend/config.py`.
+**Note (Phase 7):** The user-facing warning "A_ms/A_r split uses 80/20 legacy
+approximation" was demoted to `logger.info` to reduce noise in the UI.
+The approximation is still active; check `landcover.py` if behaviour needs
+revisiting. Similarly, the maaparandus-informational note ("maaparandus not yet
+consumed by Karl Hommik formulas") is logged at INFO only — maaparandus area
+is computed and stored in `LandCoverBreakdown.maaparandus` but the Hommik
+formulas do not yet use it as a direct input.

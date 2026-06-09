@@ -156,12 +156,20 @@ def compute_landcover(
             f"polygon overlap at catchment boundary. Values are individually clamped."
         )
 
-    warnings.append(
-        "maaparandus: computed from msr_vork.fgb drainage system polygons "
-        "(informational only — not yet consumed by Karl Hommik formulas)."
+    # These two notes are logged at INFO level, not surfaced to the user, because
+    # they describe known approximations that are already documented in ADR-011 and
+    # ADR-003 respectively.  They are intentional design choices, not actionable
+    # warnings for the end user.  See docs/decisions.md for the full rationale.
+    logger.info(
+        "maaparandus area: %.4f %% of catchment (from msr_vork.fgb); "
+        "informational only — maaparandus is not yet consumed by Karl Hommik formulas",
+        maaparandus,
     )
-    warnings.append(
-        "A_ms/A_r split uses 80/20 legacy approximation (see docs/decisions.md ADR-003)."
+    logger.info(
+        "A_ms/A_r 80/20 split applied (legacy approximation, ADR-011): "
+        "A_ms=%.4f %%, A_r=%.4f %%",
+        A_ms,
+        A_r,
     )
 
     return (

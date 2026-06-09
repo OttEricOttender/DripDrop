@@ -13,8 +13,12 @@ Usage
 from __future__ import annotations
 
 import io
+import logging
+import math
 import os
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import reportlab
 from reportlab.lib import colors
@@ -473,6 +477,122 @@ def _datasets_section(result: AnalysisResult, styles: dict, usable_w: float) -> 
 
 
 # ---------------------------------------------------------------------------
+# Catchment map image (Pillow — no extra deps beyond what's in requirements)
+# ---------------------------------------------------------------------------
+
+def _render_catchment_png(result: AnalysisResult) -> bytes | None:
+    """Render the catchment polygon + pour point as a PNG using Pillow.
+
+    Coordinates from ``catchment_geojson`` are in WGS84.  The pour point is
+    converted from L-EST97 via ``backend.gis.crs.to_wgs84``.
+
+    Returns raw PNG bytes, or None if anything fails (image is optional).
+    """
+    if result.catchment_geojson is None:
+        return None
+    try:
+        from PIL import Image, ImageDraw
+        from shapely.geometry import MultiPolygon
+        from shapely.geometry import shape as shapely_shape
+
+        from backend.gis.crs import to_wgs84
+
+        geom = shapely_shape(result.catchment_geojson)
+        minx, miny, maxx, maxy = geom.bounds
+
+        # 15 % margin so the polygon doesn't touch the image edge
+        dx = max((maxx - minx) * 0.15, 0.001)
+        dy = max((maxy - miny) * 0.15, 0.001)
+        minx -= dx; maxx += dx
+        miny -= dy; maxy += dy
+
+        # Aspect-correct canvas — WGS84 degrees at ~59°N
+        cos_lat = math.cos(math.radians((miny + maxy) / 2))
+        lon_ext = (maxx - minx) * cos_lat
+        lat_ext = maxy - miny
+
+        MAX_DIM = 440
+        if lon_ext >= lat_ext:
+            img_w = MAX_DIM
+            img_h = max(80, int(lat_ext / lon_ext * MAX_DIM))
+        else:
+            img_h = MAX_DIM
+            img_w = max(80, int(lon_ext / lat_ext * MAX_DIM))
+
+        def to_px(lon: float, lat: float) -> tuple[int, int]:
+            px = int((lon - minx) / (maxx - minx) * img_w)
+            py = int((maxy - lat) / (maxy - miny) * img_h)
+            return px, py
+
+        img = Image.new("RGB", (img_w, img_h), (240, 245, 250))
+        draw = ImageDraw.Draw(img)
+
+        def _draw_poly(poly) -> None:
+            pts = [to_px(lon, lat) for lon, lat in poly.exterior.coords]
+            draw.polygon(pts, fill=(190, 215, 240), outline=(25, 75, 155))
+            for interior in poly.interiors:
+                ipts = [to_px(lon, lat) for lon, lat in interior.coords]
+                draw.polygon(ipts, fill=(240, 245, 250), outline=(25, 75, 155))
+
+        if geom.geom_type == "MultiPolygon":
+            for part in geom.geoms:
+                _draw_poly(part)
+        else:
+            _draw_poly(geom)
+
+        # Pour point marker
+        pour_lon, pour_lat = to_wgs84(
+            result.snapped_point_lest97.x, result.snapped_point_lest97.y
+        )
+        px, py = to_px(pour_lon, pour_lat)
+        r = 5
+        draw.ellipse([(px - r, py - r), (px + r, py + r)],
+                     fill=(200, 30, 30), outline=(100, 0, 0))
+
+        # Minimal "N ↑" north indicator
+        draw.text((img_w - 22, 6), "N", fill=(50, 50, 50))
+        draw.line([(img_w - 16, 18), (img_w - 16, 8)], fill=(50, 50, 50), width=1)
+        draw.polygon([(img_w - 19, 14), (img_w - 13, 14), (img_w - 16, 8)],
+                     fill=(50, 50, 50))
+
+        # Border
+        draw.rectangle([(0, 0), (img_w - 1, img_h - 1)], outline=(160, 180, 200))
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    except Exception as exc:  # image is optional — never crash the PDF
+        logger.warning("catchment map PNG failed: %s", exc)
+        return None
+
+
+def _map_section(result: AnalysisResult, styles: dict, usable_w: float) -> list:
+    """Return a PDF section with the catchment map image, or [] if unavailable."""
+    from PIL import Image as PILImage
+    from reportlab.platypus import Image as RLImage
+
+    png = _render_catchment_png(result)
+    if png is None:
+        return []
+
+    pil = PILImage.open(io.BytesIO(png))
+    aspect = pil.height / pil.width
+    rl_w = usable_w * 0.75          # use 75 % of page width — readable but not oversized
+    rl_h = rl_w * aspect
+
+    rl_img = RLImage(io.BytesIO(png), width=rl_w, height=rl_h)
+    caption = Paragraph(
+        _safe(
+            "Joonis 1. Valgala piir (sinine) ja klammerduspunkt (punane) "
+            "WGS84 koordinaatruumis."
+        ),
+        styles["body_small"],
+    )
+    return _section("Asukohakaart", styles) + [rl_img, Spacer(1, 2 * mm), caption]
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -489,6 +609,7 @@ def generate_pdf(result: AnalysisResult) -> bytes:
 
     story: list[Any] = []
     story += _meta_section(result, styles, usable_w)
+    story += _map_section(result, styles, usable_w)
     story += _input_section(result, styles, usable_w)
     story += _landcover_section(result, styles, usable_w)
     story += _calc_section(result, styles, usable_w)

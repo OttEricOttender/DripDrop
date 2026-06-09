@@ -1,11 +1,13 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap, LayersControl } from 'react-leaflet'
 import L from 'leaflet'
 import CatchmentLayer from './CatchmentLayer'
 import type { AnalysisResult } from '../api/types'
 
-// Maa-amet aerial imagery (TMS — inverted Y axis requires tms: true)
+// Maa-amet tile layers (TMS — inverted Y axis requires tms: true)
 const MAAAMET_AERIAL = 'https://tiles.maaamet.ee/tm/tms/1.0.0/foto@GMC/{z}/{x}/{y}.png'
+const MAAAMET_MAP    = 'https://tiles.maaamet.ee/tm/tms/1.0.0/kaart@GMC/{z}/{x}/{y}.png'
+const MAAAMET_ATTR   = '&copy; <a href="https://maaamet.ee" target="_blank">Maa-amet</a>'
 
 function ClickHandler({ onMapClick }: { onMapClick: (lat: number, lon: number) => void }) {
   useMapEvents({ click: e => onMapClick(e.latlng.lat, e.latlng.lng) })
@@ -41,13 +43,26 @@ export default function MapView({ onMapClick, clickedPoint, result }: Props) {
       {/*
         Maa-amet tiles use TMS (y-inverted). The `tms` prop is valid in Leaflet
         but not in the react-leaflet typings, hence the cast.
+        kaart@GMC includes city/village/road labels; foto@GMC is aerial only.
       */}
-      <TileLayer
-        {...({ tms: true } as object)}
-        url={MAAAMET_AERIAL}
-        attribution='&copy; <a href="https://maaamet.ee" target="_blank">Maa-amet</a>'
-        maxZoom={18}
-      />
+      <LayersControl position="topright">
+        <LayersControl.BaseLayer name="Kaart (kohanimedega)">
+          <TileLayer
+            {...({ tms: true } as object)}
+            url={MAAAMET_MAP}
+            attribution={MAAAMET_ATTR}
+            maxZoom={18}
+          />
+        </LayersControl.BaseLayer>
+        <LayersControl.BaseLayer checked name="Ortofoto">
+          <TileLayer
+            {...({ tms: true } as object)}
+            url={MAAAMET_AERIAL}
+            attribution={MAAAMET_ATTR}
+            maxZoom={18}
+          />
+        </LayersControl.BaseLayer>
+      </LayersControl>
       <ClickHandler onMapClick={onMapClick} />
       <FitCatchment result={result} />
 

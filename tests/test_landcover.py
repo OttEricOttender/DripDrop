@@ -127,11 +127,22 @@ class TestComputeLandcover:
     def test_returns_warnings_list(self, kolvikud_fgb: Path, msr_vork_fgb: Path) -> None:
         _, warnings = compute_landcover(_CATCHMENT, _CATCHMENT_KM2, kolvikud_fgb, msr_vork_fgb)
         assert isinstance(warnings, list)
-        assert len(warnings) > 0
+        # maaparandus and A_ms/A_r informational notes were demoted to logger.info
+        # (see docs/decisions.md ADR-011) — the list may be empty for clean data
 
-    def test_maaparandus_warning_present(self, kolvikud_fgb: Path, msr_vork_fgb: Path) -> None:
-        _, warnings = compute_landcover(_CATCHMENT, _CATCHMENT_KM2, kolvikud_fgb, msr_vork_fgb)
-        assert any("maaparandus" in w.lower() for w in warnings)
+    def test_maaparandus_info_logged_not_warned(
+        self, kolvikud_fgb: Path, msr_vork_fgb: Path, caplog
+    ) -> None:
+        """maaparandus note must appear in logs at INFO, not in the returned warnings list."""
+        import logging
+        with caplog.at_level(logging.INFO, logger="backend.services.landcover"):
+            _, warnings = compute_landcover(_CATCHMENT, _CATCHMENT_KM2, kolvikud_fgb, msr_vork_fgb)
+        assert not any("maaparandus" in w.lower() for w in warnings), (
+            "maaparandus note must not be a user-visible warning"
+        )
+        assert any("maaparandus" in r.message.lower() for r in caplog.records), (
+            "maaparandus note must still appear in the log"
+        )
 
     def test_no_msr_vork_all_wetland_is_non_drained(
         self, kolvikud_fgb: Path, empty_msr_fgb: Path
