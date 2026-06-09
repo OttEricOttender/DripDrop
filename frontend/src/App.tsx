@@ -100,10 +100,32 @@ export default function App() {
               </div>
             )}
             {state.status === 'loading' && (
-              <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-                <div className="bg-white rounded-2xl shadow-xl px-8 py-4 text-blue-700 font-semibold flex items-center gap-3">
-                  <Droplets className="w-5 h-5 animate-pulse" />
-                  {t('loading')}
+              <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center pointer-events-none z-[1000]">
+                <div className="bg-white rounded-2xl shadow-2xl px-8 py-5 text-blue-800 font-semibold flex flex-col items-center gap-3">
+                  {/* Water-drop falling animation */}
+                  <div className="flex items-end gap-2 h-8">
+                    {[0, 1, 2, 3].map(i => (
+                      <Droplets
+                        key={i}
+                        className="w-5 h-5 text-blue-500 animate-water-drop"
+                        style={{ animationDelay: `${i * 0.28}s` }}
+                      />
+                    ))}
+                  </div>
+                  {/* Flowing wave bar */}
+                  <div className="flex gap-0.5">
+                    {[0,1,2,3,4,5,6,7].map(i => (
+                      <div
+                        key={i}
+                        className="w-1.5 bg-blue-400 rounded-full animate-wave-flow"
+                        style={{
+                          height: `${8 + Math.sin(i * 0.9) * 6}px`,
+                          animationDelay: `${i * 0.12}s`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-sm tracking-wide">{t('loading')}</span>
                 </div>
               </div>
             )}

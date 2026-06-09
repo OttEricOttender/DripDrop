@@ -668,19 +668,22 @@ def build_river_index(
     # Rename portal column names to the stable schema that snap_to_stream reads.
     rivers = rivers.rename(columns={"kr_kood": "kood", "pikk_arv": "pikkus"})
 
-    # Some rivers have pikk_arv=0 or NaN in the source data (e.g. Nuutri jõgi).
-    # Fall back to the geometry length (EPSG:3301 metres) so the PDF report
-    # never displays "0.0 km".  The source unit for pikk_arv is metres, matching
-    # EPSG:3301 geometry.length — no conversion needed.
-    if "pikkus" in rivers.columns:
-        zero_mask = rivers["pikkus"].isna() | (rivers["pikkus"] == 0)
-        if zero_mask.any():
-            rivers.loc[zero_mask, "pikkus"] = rivers.loc[zero_mask].geometry.length
-            logger.info(
-                "build_river_index: %d segment(s) had pikk_arv=0/NaN — "
-                "length computed from geometry",
-                int(zero_mask.sum()),
-            )
+    # Replace pikk_arv with geometry-derived total river length (metres, EPSG:3301).
+    # pikk_arv in the Keskkonnaportaali source has been observed to store values in km
+    # for some rivers (e.g. Pärnu jõgi pikk_arv≈144.8 km instead of 144800 m) and as
+    # 0/NaN for others (e.g. Nuutri jõgi).  Computing from geometry is always accurate,
+    # unit-consistent, and derived from the same dataset — so we ignore pikk_arv entirely.
+    # Each row gets the *total* length of all segments that share its kood, so that
+    # snap_to_stream returns the full river length rather than one segment's length.
+    kood_to_length_m = rivers.groupby("kood").apply(
+        lambda g: float(g.geometry.length.sum())
+    )
+    rivers["pikkus"] = rivers["kood"].map(kood_to_length_m)
+    logger.info(
+        "build_river_index: replaced pikk_arv with geometry-derived total length "
+        "for %d river koods",
+        rivers["kood"].nunique(),
+    )
 
     # Mark peajõed via attribute join.
     # The real vooluveekogumid dataset is LineString (not Polygon) so spatial

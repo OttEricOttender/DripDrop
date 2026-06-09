@@ -7,6 +7,7 @@ returning the nearest point on the nearest geometry.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 import geopandas as gpd
@@ -14,6 +15,23 @@ from shapely.geometry import Point
 from shapely.ops import nearest_points
 
 from backend.models.schemas import RiverInfo
+
+
+@lru_cache(maxsize=4)
+def _total_lengths_m(rivers_fgb: Path) -> dict[str, float]:
+    """Return a {kood: total_length_m} dict for every river in rivers_fgb.
+
+    Computed from geometry (EPSG:3301 metres), not from pikk_arv, because
+    pikk_arv in the Keskkonnaportaali source has been observed in km for some
+    rivers (e.g. Pärnu jõgi ≈ 144.8 instead of 144 800 m).  Loaded once and
+    cached per unique file path; restart the server after rebuilding rivers.fgb.
+    """
+    gdf = gpd.read_file(rivers_fgb)
+    return (
+        gdf.groupby("kood")["geometry"]
+        .apply(lambda segs: float(segs.length.sum()))
+        .to_dict()
+    )
 
 
 def snap_to_stream(
@@ -78,17 +96,17 @@ def snap_to_stream(
         val = nearest_row.get(col)
         return None if val is None or (hasattr(val, '__class__') and str(val) == 'nan') else val
 
-    # Fall back to geometry length when pikk_arv=0/NaN in the source dataset
-    # (e.g. Nuutri jõgi). geometry.length is in EPSG:3301 metres.
-    raw_length = _get("pikkus")
-    if not raw_length:
-        raw_length = nearest_row.geometry.length
+    # Always use geometry-derived total length (metres) — ignores pikk_arv which
+    # has unreliable units in the source dataset (km for some rivers, 0 for others).
+    river_code = str(_get("kood") or nearest_row.name)
+    lengths = _total_lengths_m(rivers_fgb)
+    total_length_m = lengths.get(river_code) or nearest_row.geometry.length
 
     river_info = RiverInfo(
-        code=str(_get("kood") or nearest_row.name),
+        code=river_code,
         name=str(_get("nimi") or ""),
         river_type=_get("tyyp"),
-        length_m=raw_length,
+        length_m=total_length_m,
         is_main=bool(_get("is_peajogi") or False),
     )
 
