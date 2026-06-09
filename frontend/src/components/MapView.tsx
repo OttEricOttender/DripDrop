@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap, LayersControl } from 'react-leaflet'
 import L from 'leaflet'
 import CatchmentLayer from './CatchmentLayer'
+import RiverLayer from './RiverLayer'
 import type { AnalysisResult } from '../api/types'
 
 // Maa-amet tile layers (TMS — inverted Y axis requires tms: true)
@@ -66,6 +67,9 @@ export default function MapView({ onMapClick, clickedPoint, result }: Props) {
       <ClickHandler onMapClick={onMapClick} />
       <FitCatchment result={result} />
 
+      {result?.river_geojson && (
+        <RiverLayer geojson={result.river_geojson} />
+      )}
       {result?.catchment_geojson && (
         <CatchmentLayer geojson={result.catchment_geojson} />
       )}

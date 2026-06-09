@@ -197,6 +197,20 @@ async def analyze(
     except Exception:
         catchment_geojson = None
 
+    # Collect all river segments with the same kood for map highlighting
+    river_geojson: dict | None = None
+    try:
+        import geopandas as gpd
+        from shapely.geometry import mapping
+        river_segments = gpd.read_file(rivers_fgb)
+        matching = river_segments[river_segments["kood"] == river_info.code]
+        if not matching.empty:
+            from shapely.ops import unary_union
+            merged = unary_union(matching.geometry.values)
+            river_geojson = dict(crs.to_wgs84_geojson(merged))
+    except Exception:
+        pass
+
     return AnalysisResult(
         run_id=uuid.uuid4().hex,
         timestamp=datetime.now(timezone.utc),
@@ -208,6 +222,7 @@ async def analyze(
         landcover=landcover_breakdown,
         hommik=hommik_result,
         catchment_geojson=catchment_geojson,
+        river_geojson=river_geojson,
         dataset_versions=dataset_versions,
         warnings=warnings,
     )

@@ -75,6 +75,7 @@ export interface AnalysisResult {
   landcover: LandCoverBreakdown
   hommik: HommikResult
   catchment_geojson: object | null
+  river_geojson: object | null
   dataset_versions: DatasetVersion[]
   warnings: string[]
 }

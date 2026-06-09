@@ -177,5 +177,6 @@ class AnalysisResult(BaseModel):
     landcover: LandCoverBreakdown
     hommik: HommikResult
     catchment_geojson: dict | None = Field(None, description="GeoJSON Polygon in WGS84 for map display")
+    river_geojson: dict | None = Field(None, description="GeoJSON MultiLineString of the snapped river in WGS84")
     dataset_versions: list[DatasetVersion]
     warnings: list[str] = Field(default_factory=list)
