@@ -19,6 +19,9 @@ export default function App() {
   const result = state.status === 'success' ? state.result : null
 
   async function handleRun(req: AnalysisRequest) {
+    if (req.point_wgs84) {
+      setPendingPoint({ lat: req.point_wgs84.lat, lon: req.point_wgs84.lon })
+    }
     await run({ ...req, p_percent: p })
   }
 

@@ -480,11 +480,45 @@ def _datasets_section(result: AnalysisResult, styles: dict, usable_w: float) -> 
 # Catchment map image (Pillow — no extra deps beyond what's in requirements)
 # ---------------------------------------------------------------------------
 
-def _render_catchment_png(result: AnalysisResult) -> bytes | None:
-    """Render the catchment polygon + pour point as a PNG using Pillow.
+_MAAMET_WMS = "https://kaart.maaamet.ee/wms/alus"
+_WMS_LAYER  = "pohi_vr2"   # Maa-amet topographic base map in EPSG:3301
 
-    Coordinates from ``catchment_geojson`` are in WGS84.  The pour point is
-    converted from L-EST97 via ``backend.gis.crs.to_wgs84``.
+
+def _fetch_wms_background(
+    minx: float, miny: float, maxx: float, maxy: float,
+    width: int, height: int,
+) -> "PIL.Image.Image | None":
+    """Fetch a Maa-amet kaart tile via WMS (EPSG:3301 bbox).
+
+    Returns a PIL Image on success, None if the request fails (offline /
+    server error) so the caller can fall back to a plain background.
+    """
+    try:
+        import httpx
+        from PIL import Image as PILImage
+
+        params = {
+            "SERVICE": "WMS", "VERSION": "1.1.1", "REQUEST": "GetMap",
+            "LAYERS": _WMS_LAYER, "STYLES": "",
+            "BBOX": f"{minx},{miny},{maxx},{maxy}",
+            "WIDTH": str(width), "HEIGHT": str(height),
+            "SRS": "EPSG:3301",
+            "FORMAT": "image/png", "TRANSPARENT": "false",
+        }
+        resp = httpx.get(_MAAMET_WMS, params=params, timeout=8.0)
+        if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/"):
+            return PILImage.open(io.BytesIO(resp.content)).convert("RGB")
+    except Exception as exc:
+        logger.info("WMS background fetch failed (will use plain background): %s", exc)
+    return None
+
+
+def _render_catchment_png(result: AnalysisResult) -> bytes | None:
+    """Render the catchment polygon + pour point as a PNG.
+
+    Uses Maa-amet kaart WMS as the background (EPSG:3301).  Falls back to a
+    plain light-blue background if the WMS call fails (e.g. offline).
+    The catchment GeoJSON is in WGS84 — converted to L-EST97 for pixel math.
 
     Returns raw PNG bytes, or None if anything fails (image is optional).
     """
@@ -492,47 +526,56 @@ def _render_catchment_png(result: AnalysisResult) -> bytes | None:
         return None
     try:
         from PIL import Image, ImageDraw
-        from shapely.geometry import MultiPolygon
         from shapely.geometry import shape as shapely_shape
+        from shapely.ops import transform as shapely_transform
 
-        from backend.gis.crs import to_wgs84
+        from backend.gis.crs import _transformer, LEST97, WGS84
 
-        geom = shapely_shape(result.catchment_geojson)
+        # Re-project catchment from WGS84 → L-EST97 for EPSG:3301 pixel math
+        geom_wgs84 = shapely_shape(result.catchment_geojson)
+        t = _transformer(WGS84, LEST97)
+        geom = shapely_transform(t.transform, geom_wgs84)
+
         minx, miny, maxx, maxy = geom.bounds
 
-        # 15 % margin so the polygon doesn't touch the image edge
-        dx = max((maxx - minx) * 0.15, 0.001)
-        dy = max((maxy - miny) * 0.15, 0.001)
+        # 15 % margin
+        dx = max((maxx - minx) * 0.15, 100.0)
+        dy = max((maxy - miny) * 0.15, 100.0)
         minx -= dx; maxx += dx
         miny -= dy; maxy += dy
 
-        # Aspect-correct canvas — WGS84 degrees at ~59°N
-        cos_lat = math.cos(math.radians((miny + maxy) / 2))
-        lon_ext = (maxx - minx) * cos_lat
-        lat_ext = maxy - miny
-
+        # Canvas dimensions — preserve real-world aspect ratio (L-EST97 is metric)
+        extent_x = maxx - minx
+        extent_y = maxy - miny
         MAX_DIM = 440
-        if lon_ext >= lat_ext:
+        if extent_x >= extent_y:
             img_w = MAX_DIM
-            img_h = max(80, int(lat_ext / lon_ext * MAX_DIM))
+            img_h = max(80, int(extent_y / extent_x * MAX_DIM))
         else:
             img_h = MAX_DIM
-            img_w = max(80, int(lon_ext / lat_ext * MAX_DIM))
+            img_w = max(80, int(extent_x / extent_y * MAX_DIM))
 
-        def to_px(lon: float, lat: float) -> tuple[int, int]:
-            px = int((lon - minx) / (maxx - minx) * img_w)
-            py = int((maxy - lat) / (maxy - miny) * img_h)
+        def to_px(x: float, y: float) -> tuple[int, int]:
+            px = int((x - minx) / (maxx - minx) * img_w)
+            py = int((maxy - y) / (maxy - miny) * img_h)
             return px, py
 
-        img = Image.new("RGB", (img_w, img_h), (240, 245, 250))
-        draw = ImageDraw.Draw(img)
+        # --- Background: try WMS, fall back to plain colour ---
+        bg = _fetch_wms_background(minx, miny, maxx, maxy, img_w, img_h)
+        if bg is not None:
+            img = bg.resize((img_w, img_h))
+        else:
+            img = Image.new("RGB", (img_w, img_h), (240, 245, 250))
 
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        # --- Catchment polygon (semi-transparent blue fill) ---
         def _draw_poly(poly) -> None:
-            pts = [to_px(lon, lat) for lon, lat in poly.exterior.coords]
-            draw.polygon(pts, fill=(190, 215, 240), outline=(25, 75, 155))
+            pts = [to_px(x, y) for x, y in poly.exterior.coords]
+            draw.polygon(pts, fill=(25, 100, 200, 80), outline=(25, 75, 155, 255))
             for interior in poly.interiors:
-                ipts = [to_px(lon, lat) for lon, lat in interior.coords]
-                draw.polygon(ipts, fill=(240, 245, 250), outline=(25, 75, 155))
+                ipts = [to_px(x, y) for x, y in interior.coords]
+                draw.polygon(ipts, fill=(240, 245, 250, 200), outline=(25, 75, 155, 200))
 
         if geom.geom_type == "MultiPolygon":
             for part in geom.geoms:
@@ -540,26 +583,27 @@ def _render_catchment_png(result: AnalysisResult) -> bytes | None:
         else:
             _draw_poly(geom)
 
-        # Pour point marker
-        pour_lon, pour_lat = to_wgs84(
-            result.snapped_point_lest97.x, result.snapped_point_lest97.y
-        )
-        px, py = to_px(pour_lon, pour_lat)
-        r = 5
+        # --- Pour point marker ---
+        px, py = to_px(result.snapped_point_lest97.x, result.snapped_point_lest97.y)
+        r = 6
         draw.ellipse([(px - r, py - r), (px + r, py + r)],
-                     fill=(200, 30, 30), outline=(100, 0, 0))
+                     fill=(220, 30, 30, 230), outline=(100, 0, 0, 255))
 
-        # Minimal "N ↑" north indicator
-        draw.text((img_w - 22, 6), "N", fill=(50, 50, 50))
-        draw.line([(img_w - 16, 18), (img_w - 16, 8)], fill=(50, 50, 50), width=1)
+        # --- North arrow ---
+        draw.text((img_w - 22, 6), "N", fill=(30, 30, 30, 220))
+        draw.line([(img_w - 16, 18), (img_w - 16, 8)], fill=(30, 30, 30, 220), width=1)
         draw.polygon([(img_w - 19, 14), (img_w - 13, 14), (img_w - 16, 8)],
-                     fill=(50, 50, 50))
+                     fill=(30, 30, 30, 220))
 
-        # Border
-        draw.rectangle([(0, 0), (img_w - 1, img_h - 1)], outline=(160, 180, 200))
+        # --- Border ---
+        draw.rectangle([(0, 0), (img_w - 1, img_h - 1)], outline=(160, 180, 200, 255))
+
+        # Flatten RGBA → RGB before saving as PNG for ReportLab
+        flat = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+        flat.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
 
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        flat.save(buf, format="PNG")
         return buf.getvalue()
 
     except Exception as exc:  # image is optional — never crash the PDF
@@ -584,8 +628,9 @@ def _map_section(result: AnalysisResult, styles: dict, usable_w: float) -> list:
     rl_img = RLImage(io.BytesIO(png), width=rl_w, height=rl_h)
     caption = Paragraph(
         _safe(
-            "Joonis 1. Valgala piir (sinine) ja klammerduspunkt (punane) "
-            "WGS84 koordinaatruumis."
+            "Joonis 1. Valgala piir (sinine) ja klammerduspunkt (punane). "
+            "Taustakaart: Maa-amet aluskaart (EPSG:3301). "
+            "Allikas: kaart.maaamet.ee."
         ),
         styles["body_small"],
     )

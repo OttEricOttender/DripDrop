@@ -108,10 +108,15 @@ async def analyze(
         catchment_poly, area_km2, dem_resolution_m = watershed.delineate_catchment(
             x_snap, y_snap, kkr_code, pre
         )
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=(
+                f"Watershed '{kkr_code}' has not been preprocessed yet. "
+                f"Run 'python scripts/preprocess.py' to generate the flow grids. "
+                f"Large watersheds (e.g. Narva VEE1062200) require ≥25 GB RAM "
+                f"and use auto-downsampling to 25 m resolution."
+            ),
         )
     except ValueError as exc:
         raise HTTPException(

@@ -78,11 +78,17 @@ def snap_to_stream(
         val = nearest_row.get(col)
         return None if val is None or (hasattr(val, '__class__') and str(val) == 'nan') else val
 
+    # Fall back to geometry length when pikk_arv=0/NaN in the source dataset
+    # (e.g. Nuutri jõgi). geometry.length is in EPSG:3301 metres.
+    raw_length = _get("pikkus")
+    if not raw_length:
+        raw_length = nearest_row.geometry.length
+
     river_info = RiverInfo(
         code=str(_get("kood") or nearest_row.name),
         name=str(_get("nimi") or ""),
         river_type=_get("tyyp"),
-        length_m=_get("pikkus"),
+        length_m=raw_length,
         is_main=bool(_get("is_peajogi") or False),
     )
 
