@@ -12,34 +12,29 @@ For the rationale behind every architectural choice, read `docs/decisions.md`.
 
 ---
 
-## State summary
+## State summary (updated 2026-06-10 — all 6 phases complete)
 
-* **Repo:** master branch, ahead of `origin/master` by zero commits — the
-  Phase 0 + 1 work has **not yet been committed**. The first thing the
-  next agent should do is review and commit it (suggested commits below).
-* **Backend:** new FastAPI app under `backend/`, scaffold + Karl Hommik
-  calculator live. `POST /api/hommik/calculate` returns a verified
-  worked example.
-* **Tests:** 28 passing + 1 strict `xfail` that locks in the legacy
-  `scripts/calculations.py` bug as the Phase 3 regression target.
-* **Docker:** `backend-service` added to `docker-compose.yml` (port 8000)
-  alongside the legacy `main-service` (port 5001) and `database-service`
-  (postgis on 5434). The new service uses a named volume
-  `hydrocalc_preprocessed` to hold the per-valgla rasters Phase 2 will
-  generate.
-* **Legacy code:** `app/` (Flask) and `scripts/` (delineate.py,
-  calculations.py) are untouched and still working. They will be
-  deleted at the end of Phase 3.
+* **Repo:** master branch, all phases shipped and committed.
+* **Backend:** FastAPI app under `backend/`; full snap → catchment → landcover →
+  maaparandus → Hommik pipeline at `POST /api/analyze`. PDF report at
+  `POST /api/report`. 145 tests passing + 1 strict `xfail` (legacy module).
+* **Frontend:** React + TS + Vite + Leaflet + Tailwind at `frontend/`. Map click
+  or coordinate input → instant analysis → PDF download.
+* **Docker:** three-service stack — postgis (5434), legacy Flask (5001, kept for
+  reference), FastAPI (8000). `docker compose up` boots everything.
+* **GIS preprocessing:** `scripts/preprocess.py` has run against all official
+  Estonian datasets; 2909/2910 valglad preprocessed. Narva VEE1062200 requires
+  ≥25 GB RAM and is skipped.
+* **Legacy code:** `app/` (Flask) and old `scripts/` are preserved but not used
+  by the new stack.
 
 ## What's NOT done yet
 
-* Phase 2 — offline GIS preprocessing pipeline (`scripts/preprocess.py`).
-  This is the next phase and the most data-sensitive one.
-* Phase 3 — wiring snap → catchment → landcover → maaparandus → Hommik
-  into a `POST /api/analyze` route.
-* Phase 4 — React + TS + Leaflet + Tailwind frontend.
-* Phase 5 — PDF report following `TÜ_pdf_vorm.pdf` exactly.
-* Phase 6 — Docker hardening, CI, reproducibility tests, deployment docs.
+* **Deployment** — Docker production setup, domain svam.ee, TLS. This is Phase 7.
+* **q̄_k cartogram** — raster not yet provided by customer. Until provided, all
+  results use placeholder 7.0 l/(s·km²) and are flagged as non-legally-defensible.
+* **Code review fixes** — 19-item critical review completed 2026-06-09. Fixes
+  implemented 2026-06-10 (all 19 items). Tests should still be 145 pass + 1 xfail.
 
 ---
 

@@ -14,10 +14,11 @@ export default function ProbabilitySelect({ value, onChange }: Props) {
     <Card>
       <CardContent className="py-3">
         <div className="flex items-center gap-3">
-          <label className="text-sm font-semibold text-slate-700 whitespace-nowrap shrink-0">
+          <label htmlFor="prob-select" className="text-sm font-semibold text-slate-700 whitespace-nowrap shrink-0">
             {t('probLabel')}
           </label>
           <select
+            id="prob-select"
             value={value}
             onChange={e => onChange(Number(e.target.value))}
             className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900

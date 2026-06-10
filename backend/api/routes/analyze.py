@@ -15,9 +15,12 @@ No business logic lives here; each step delegates to a service module.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -189,12 +192,13 @@ async def analyze(
                     ))
                 except (KeyError, ValueError):
                     pass
-        except Exception:
-            pass
+        except (ImportError, OSError, KeyError, ValueError) as exc:
+            logger.warning("Failed to read datasets manifest: %s", exc)
 
     try:
         catchment_geojson: dict | None = crs.to_wgs84_geojson(catchment_poly)
-    except Exception:
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("catchment_geojson construction failed: %s", exc)
         catchment_geojson = None
 
     # Collect all river segments with the same kood for map highlighting
@@ -208,8 +212,8 @@ async def analyze(
             from shapely.ops import unary_union
             merged = unary_union(matching.geometry.values)
             river_geojson = dict(crs.to_wgs84_geojson(merged))
-    except Exception:
-        pass
+    except (OSError, ValueError, AttributeError, KeyError) as exc:
+        logger.warning("river_geojson construction failed: %s", exc)
 
     return AnalysisResult(
         run_id=uuid.uuid4().hex,
@@ -225,4 +229,5 @@ async def analyze(
         river_geojson=river_geojson,
         dataset_versions=dataset_versions,
         warnings=warnings,
+        q_bar_k_is_placeholder=q_bar_k_sample.source == "placeholder",
     )

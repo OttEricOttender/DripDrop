@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap, LayersControl } from 'react-leaflet'
 import L from 'leaflet'
+import type { GeoJsonObject } from 'geojson'
 import CatchmentLayer from './CatchmentLayer'
 import RiverLayer from './RiverLayer'
 import type { AnalysisResult } from '../api/types'
@@ -20,8 +21,7 @@ function FitCatchment({ result }: { result: AnalysisResult | null }) {
   useEffect(() => {
     if (!result?.catchment_geojson) return
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bounds = L.geoJSON(result.catchment_geojson as any).getBounds()
+      const bounds = L.geoJSON(result.catchment_geojson as GeoJsonObject).getBounds()
       if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] })
     } catch { /* leave map at current view */ }
   }, [result, map])

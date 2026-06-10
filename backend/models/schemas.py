@@ -33,8 +33,8 @@ class CoordinateLEST97(BaseModel):
     """Easting/northing in EPSG:3301 (Estonia's official engineering CRS)."""
 
     model_config = ConfigDict(extra="forbid")
-    x: float = Field(..., description="Easting in metres (L-EST97)")
-    y: float = Field(..., description="Northing in metres (L-EST97)")
+    x: float = Field(..., ge=369_000, le=739_000, description="Easting in metres (L-EST97)")
+    y: float = Field(..., ge=6_377_000, le=6_634_000, description="Northing in metres (L-EST97)")
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +180,6 @@ class AnalysisResult(BaseModel):
     river_geojson: dict | None = Field(None, description="GeoJSON MultiLineString of the snapped river in WGS84")
     dataset_versions: list[DatasetVersion]
     warnings: list[str] = Field(default_factory=list)
+    q_bar_k_is_placeholder: bool = Field(
+        ..., description="True when q̄_k is from the placeholder value, not the cartogram raster"
+    )

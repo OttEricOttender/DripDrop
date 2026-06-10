@@ -89,6 +89,7 @@ def _make_analysis_result() -> AnalysisResult:
             )
         ],
         warnings=["q_bar_k placeholder value used — outputs not legally defensible"],
+        q_bar_k_is_placeholder=True,
     )
 
 

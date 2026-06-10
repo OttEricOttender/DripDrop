@@ -1,5 +1,7 @@
 // TypeScript interfaces mirroring backend/models/schemas.py — keep in sync manually.
 
+import type { GeoJsonObject } from 'geojson'
+
 export interface CoordinateWGS84 {
   lat: number
   lon: number
@@ -74,8 +76,9 @@ export interface AnalysisResult {
   catchment: CatchmentInfo
   landcover: LandCoverBreakdown
   hommik: HommikResult
-  catchment_geojson: object | null
-  river_geojson: object | null
+  catchment_geojson: GeoJsonObject | null
+  river_geojson: GeoJsonObject | null
   dataset_versions: DatasetVersion[]
   warnings: string[]
+  q_bar_k_is_placeholder: boolean
 }

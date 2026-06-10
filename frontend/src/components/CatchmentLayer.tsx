@@ -1,15 +1,15 @@
 import { GeoJSON } from 'react-leaflet'
+import type { GeoJsonObject } from 'geojson'
 
 interface Props {
-  geojson: object
+  geojson: GeoJsonObject
 }
 
 export default function CatchmentLayer({ geojson }: Props) {
   return (
     <GeoJSON
       key={JSON.stringify(geojson).slice(0, 40)}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data={geojson as any}
+      data={geojson}
       style={{
         color: '#1d4ed8',
         weight: 2,

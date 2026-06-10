@@ -78,5 +78,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "gis: marks tests that require GIS data fixtures",
+    # reproducibility tests require datasets.lock.json and the preprocessed data on disk.
+    # Run explicitly: PYTHONPATH=. python -m pytest -m reproducibility tests/test_reproducibility.py
     "reproducibility: marks tests that lock byte-equal scientific output",
 ]

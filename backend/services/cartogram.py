@@ -75,6 +75,10 @@ def sample_q95(
             import rasterio
             with rasterio.open(raster_path) as src:
                 row, col = src.index(x_lest97, y_lest97)
+                if not (0 <= row < src.height and 0 <= col < src.width):
+                    raise ValueError(
+                        f"Coordinate ({x_lest97:.0f}, {y_lest97:.0f}) is outside raster extent."
+                    )
                 value = float(src.read(1)[row, col])
             if value != src.nodata:
                 return CartogramSample(

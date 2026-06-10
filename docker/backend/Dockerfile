@@ -5,7 +5,7 @@
 # Once the migration completes (end of Phase 3) the legacy image will
 # be deleted.
 
-FROM continuumio/miniconda3:latest
+FROM continuumio/miniconda3:23.10.0-1
 
 WORKDIR /hydro
 
@@ -38,6 +38,9 @@ COPY data/datasets.lock.json /hydro/data/datasets.lock.json
 COPY docs/ /hydro/docs
 
 EXPOSE 8000
+
+RUN useradd -m -u 1000 appuser && chown -R appuser /hydro
+USER appuser
 
 # --proxy-headers so we can deploy behind a reverse proxy later (Phase 6).
 CMD ["uvicorn", "backend.main:app", \

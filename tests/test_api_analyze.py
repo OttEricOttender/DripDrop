@@ -122,8 +122,6 @@ def _patch_all(pre: Path):
 class TestAnalyzeEndpoint:
     def test_returns_200_with_wgs84_input(self, tmp_path: Path) -> None:
         client, pre = _make_client_with_rivers(tmp_path)
-        with pytest.ExceptionInfo if False else contextlib_nullcontext():
-            pass
         patches = _patch_all(pre)
         with _apply_patches(patches):
             resp = client.post(

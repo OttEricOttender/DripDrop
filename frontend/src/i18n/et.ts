@@ -51,6 +51,7 @@ const et: Record<string, string> = {
   C: 'Lage mineraalmaa (C)',
   maaparandus: 'Maaparandus',
   a_wet_mineral_plus_akm: 'Parameeter a',
+  other: 'Muu',
 
   // Hommik
   Q_kev_max: 'Kevadine tippvooluhulk Q_kev',

@@ -42,6 +42,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "raster is provided. See backend/services/cartogram.py.",
             settings.q_bar_k_placeholder_l_per_s_km2,
         )
+    if "*" in settings.allowed_origins_list:
+        logger.warning(
+            "CORS policy is open (*) — set HYDROCALC_ALLOWED_ORIGINS for production."
+        )
     yield
     # nothing to clean up on shutdown yet
 

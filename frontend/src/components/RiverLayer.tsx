@@ -1,15 +1,15 @@
 import { GeoJSON } from 'react-leaflet'
+import type { GeoJsonObject } from 'geojson'
 
 interface Props {
-  geojson: object
+  geojson: GeoJsonObject
 }
 
 export default function RiverLayer({ geojson }: Props) {
   return (
     <GeoJSON
       key={JSON.stringify(geojson).slice(0, 40)}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data={geojson as any}
+      data={geojson}
       style={{
         color: '#dc2626',
         weight: 3,

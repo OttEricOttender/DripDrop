@@ -78,7 +78,7 @@ export default function App() {
                     <WarningBanner
                       key={i}
                       message={w}
-                      isPlaceholder={w.includes('placeholder') || w.includes('asendusarvutus')}
+                      isPlaceholder={result.q_bar_k_is_placeholder}
                     />
                   ))}
                   <ResultPanel result={result} />

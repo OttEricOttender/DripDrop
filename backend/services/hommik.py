@@ -39,8 +39,11 @@ constant in this file and bump ``formula_revision``.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 from backend.models.schemas import (
     HommikInputs,
@@ -235,6 +238,13 @@ def compute(
     k_value = k95(q95=inputs.q95_l_per_s_km2, q_bar_value=qbar)
     rs_value = r_s(A_ms=lc.A_ms, A_r=lc.A_r, A_km=lc.A_km, B=lc.B, C=lc.C)
     r_value = r(A_ms=lc.A_ms, A_r=lc.A_r, A_km=lc.A_km, B=lc.B, C=lc.C)
+
+    if k_value + rs_value > 1.0:
+        logger.warning(
+            "k95 + r_s = %.3f > 1 (k95=%.3f, r_s=%.3f); "
+            "exponent is negative — result may be unrealistically large.",
+            k_value + rs_value, k_value, rs_value,
+        )
 
     q_veg = q_veg_max(qbar, p_effective, A_effective, k_value, rs_value)
     q_kev = q_kev_max(qbar, p_effective, A_effective, k_value, r_value)
