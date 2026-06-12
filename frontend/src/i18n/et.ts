@@ -52,6 +52,8 @@ const et: Record<string, string> = {
   maaparandus: 'Maaparandus',
   a_wet_mineral_plus_akm: 'Parameeter a',
   other: 'Muu',
+  clickedHere: 'Klõpsasid siin',
+  snappedToRiver: 'Lähim punkt jõel',
 
   // Hommik
   Q_kev_max: 'Kevadine tippvooluhulk Q_kev',

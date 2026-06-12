@@ -583,11 +583,16 @@ def _render_catchment_png(result: AnalysisResult) -> bytes | None:
         else:
             _draw_poly(geom)
 
-        # --- Pour point marker ---
+        # --- Pour point marker (red) — snapped stream point ---
         px, py = to_px(result.snapped_point_lest97.x, result.snapped_point_lest97.y)
         r = 6
         draw.ellipse([(px - r, py - r), (px + r, py + r)],
                      fill=(220, 30, 30, 230), outline=(100, 0, 0, 255))
+
+        # --- Clicked point marker (blue) — original user input ---
+        cx, cy = to_px(result.input_point_lest97.x, result.input_point_lest97.y)
+        draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)],
+                     fill=(37, 99, 235, 210), outline=(29, 78, 216, 255))
 
         # --- North arrow ---
         draw.text((img_w - 22, 6), "N", fill=(30, 30, 30, 220))
@@ -628,7 +633,7 @@ def _map_section(result: AnalysisResult, styles: dict, usable_w: float) -> list:
     rl_img = RLImage(io.BytesIO(png), width=rl_w, height=rl_h)
     caption = Paragraph(
         _safe(
-            "Joonis 1. Valgala piir (sinine) ja klammerduspunkt (punane). "
+            "Joonis 1. Valgala piir (sinine), jõele klammerduspunkt (punane) ja sisestuspunkt (sinine). "
             "Taustakaart: Maa-amet aluskaart (EPSG:3301). "
             "Allikas: kaart.maaamet.ee."
         ),

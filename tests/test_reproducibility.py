@@ -18,6 +18,7 @@ from backend.models.schemas import (
     AnalysisResult,
     CatchmentInfo,
     CoordinateLEST97,
+    CoordinateWGS84,
     DatasetVersion,
     HommikInputs,
     HommikResult,
@@ -90,6 +91,7 @@ def _make_analysis_result() -> AnalysisResult:
         ],
         warnings=["q_bar_k placeholder value used — outputs not legally defensible"],
         q_bar_k_is_placeholder=True,
+        snapped_point_wgs84=CoordinateWGS84(lat=58.44, lon=24.77),
     )
 
 

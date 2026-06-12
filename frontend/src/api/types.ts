@@ -81,4 +81,5 @@ export interface AnalysisResult {
   dataset_versions: DatasetVersion[]
   warnings: string[]
   q_bar_k_is_placeholder: boolean
+  snapped_point_wgs84: CoordinateWGS84
 }

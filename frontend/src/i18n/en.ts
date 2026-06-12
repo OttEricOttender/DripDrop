@@ -43,6 +43,8 @@ const en: Record<string, string> = {
   maaparandus: 'Land improvement',
   a_wet_mineral_plus_akm: 'Parameter a',
   other: 'Other',
+  clickedHere: 'You clicked here',
+  snappedToRiver: 'Nearest river point',
 
   Q_kev_max: 'Spring peak flow Q_kev',
   Q_veg_max: 'Autumn peak flow Q_veg',

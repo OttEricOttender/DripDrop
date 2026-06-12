@@ -31,6 +31,7 @@ from backend.models.schemas import (
     AnalysisResult,
     CatchmentInfo,
     CoordinateLEST97,
+    CoordinateWGS84,
     DatasetVersion,
     HommikInputs,
 )
@@ -95,6 +96,7 @@ async def analyze(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         )
+    lon_snap, lat_snap = crs.to_wgs84(x_snap, y_snap)
 
     # --- 3. Find valgla ---------------------------------------------------
     valglad_fgb = pre / "valglad.fgb"
@@ -230,4 +232,5 @@ async def analyze(
         dataset_versions=dataset_versions,
         warnings=warnings,
         q_bar_k_is_placeholder=q_bar_k_sample.source == "placeholder",
+        snapped_point_wgs84=CoordinateWGS84(lat=lat_snap, lon=lon_snap),
     )

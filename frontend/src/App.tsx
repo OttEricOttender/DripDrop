@@ -33,32 +33,27 @@ export default function App() {
 
   return (
     <LanguageContext.Provider value={{ lang, setLang, t }}>
-      <div className="flex flex-col" style={{ height: '100vh' }}>
+      <div className="flex" style={{ height: '100vh' }}>
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <header className="bg-gradient-to-r from-blue-950 to-blue-800 text-white px-5 py-3 flex items-center justify-between shrink-0 shadow-md">
-          <div className="flex items-center gap-3">
-            <Droplets className="w-6 h-6 text-blue-300" strokeWidth={1.75} />
-            <div className="flex items-baseline gap-2.5">
-              <span className="font-bold text-lg tracking-tight">{t('appTitle')}</span>
-              <span className="text-blue-300 text-sm hidden sm:inline opacity-90">{t('appSubtitle')}</span>
+        {/* ── Sidebar (owns the header) ───────────────────────────── */}
+        <aside className="w-80 xl:w-96 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 z-10">
+
+          {/* Header — sidebar-width only */}
+          <header className="bg-gradient-to-r from-blue-950 to-blue-800 text-white px-5 py-3 flex items-center justify-between shrink-0 shadow-md">
+            <div className="flex items-center gap-3">
+              <Droplets className="w-8 h-8 text-blue-300" strokeWidth={1.75} />
+              <span className="font-bold text-2xl tracking-tight">{t('appTitle')}</span>
             </div>
-          </div>
-          <button
-            onClick={() => setLang(lang === 'et' ? 'en' : 'et')}
-            className="text-xs font-semibold border border-blue-500/60 px-3 py-1.5 rounded-lg hover:bg-blue-700/50 hover:border-blue-400 transition-all"
-            title="Toggle language / Vaheta keel"
-          >
-            {lang === 'et' ? 'EN' : 'ET'}
-          </button>
-        </header>
+            <button
+              onClick={() => setLang(lang === 'et' ? 'en' : 'et')}
+              className="text-xs font-semibold border border-blue-500/60 px-3 py-1.5 rounded-lg hover:bg-blue-700/50 hover:border-blue-400 transition-all"
+              title="Toggle language / Vaheta keel"
+            >
+              {lang === 'et' ? 'EN' : 'ET'}
+            </button>
+          </header>
 
-        {/* ── Body ───────────────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0">
-
-          {/* Sidebar */}
-          <aside className="w-80 xl:w-96 bg-slate-50 border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 z-10">
-            <div className="p-4 space-y-3">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <CoordInput
                 pendingPoint={pendingPoint}
                 onSubmit={handleRun}
@@ -84,18 +79,18 @@ export default function App() {
                   <ResultPanel result={result} />
                 </div>
               )}
-            </div>
-          </aside>
+          </div>
+        </aside>
 
-          {/* Map */}
-          <div className="flex-1 relative min-w-0">
+        {/* ── Map ────────────────────────────────────────────────── */}
+        <div className="flex-1 relative min-w-0">
             <MapView
               onMapClick={handleMapClick}
               clickedPoint={pendingPoint}
               result={result}
             />
             {!result && state.status !== 'loading' && (
-              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-4 py-2 rounded-full shadow-lg text-sm text-slate-500 pointer-events-none border border-slate-200">
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-4 py-2 rounded-full shadow-lg text-sm text-slate-500 pointer-events-none border border-slate-200 z-[500]">
                 {t('clickMapHint')}
               </div>
             )}
@@ -129,9 +124,8 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
-
         </div>
+
       </div>
     </LanguageContext.Provider>
   )

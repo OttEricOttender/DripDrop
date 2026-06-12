@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap, LayersControl } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Tooltip, useMapEvents, useMap, LayersControl } from 'react-leaflet'
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
 import CatchmentLayer from './CatchmentLayer'
 import RiverLayer from './RiverLayer'
 import type { AnalysisResult } from '../api/types'
+import { useT } from '../i18n'
 
 // Maa-amet tile layers (TMS — inverted Y axis requires tms: true)
 const MAAAMET_AERIAL = 'https://tiles.maaamet.ee/tm/tms/1.0.0/foto@GMC/{z}/{x}/{y}.png'
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export default function MapView({ onMapClick, clickedPoint, result }: Props) {
+  const { t } = useT()
   return (
     <MapContainer
       center={[58.8, 25.5]}
@@ -74,16 +76,26 @@ export default function MapView({ onMapClick, clickedPoint, result }: Props) {
         <CatchmentLayer geojson={result.catchment_geojson} />
       )}
 
+      {/* Blue pin — original click location */}
       {clickedPoint && (
         <Marker position={[clickedPoint.lat, clickedPoint.lon]}>
-          {result && (
-            <Popup>
-              <strong>{result.river.name}</strong>
-              <br />
-              {result.catchment.area_km2.toFixed(1)} km²
-            </Popup>
-          )}
+          <Tooltip>{t('clickedHere')}</Tooltip>
         </Marker>
+      )}
+
+      {/* Red circle — snapped stream point, shown once result is ready */}
+      {result?.snapped_point_wgs84 && (
+        <CircleMarker
+          center={[result.snapped_point_wgs84.lat, result.snapped_point_wgs84.lon]}
+          radius={8}
+          pathOptions={{ color: '#991b1b', fillColor: '#ef4444', fillOpacity: 0.9, weight: 2 }}
+        >
+          <Tooltip direction="top" offset={[0, -12]}>{t('snappedToRiver')}</Tooltip>
+          <Popup>
+            <strong>{result.river.name}</strong><br />
+            {result.catchment.area_km2.toFixed(1)} km²
+          </Popup>
+        </CircleMarker>
       )}
     </MapContainer>
   )
